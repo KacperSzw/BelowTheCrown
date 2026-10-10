@@ -1,0 +1,495 @@
+{
+  "title": "The Last Ration",
+  "introduction": "Beyond the walls, horns answer the last bell. Your cell is locked. One hungry guard counts what remains.",
+  "objectives": {
+    "solo": "Escape the dungeon. Bring about King {actor:103:nom}’s death.",
+    "multiplayer": "Bring about King {actor:103:nom}’s death."
+  },
+  "rooms": {
+    "1": {
+      "name": "Dungeon",
+      "description": "Water beads on the stone. A stool, a straw pallet, and a narrow table occupy the cell. Iron bars cut the torchlight into strips."
+    },
+    "2": {
+      "name": "Guard quarters",
+      "description": "Boots dry beside a brazier. A shift ledger lies open on a scarred table; empty mugs mark the absent watch."
+    },
+    "3": {
+      "name": "Lower passage",
+      "description": "A low passage carries footsteps between the kitchens and the yard. The stone is worn smooth by years of servants passing unseen."
+    },
+    "4": {
+      "name": "Kitchen",
+      "description": "The hearth gives off a thick, welcome heat. Supper waits in covered bowls, and someone has counted every portion."
+    },
+    "5": {
+      "name": "Pantry",
+      "description": "Four measured sacks remain below a chalk tally. A folded order lies beneath the store jar."
+    },
+    "6": {
+      "name": "Servants’ quarters",
+      "description": "Narrow beds surround a small table. A spare livery hangs beside the service stairs. Voices tend to fall quiet here."
+    },
+    "7": {
+      "name": "Infirmary",
+      "description": "Clean linen is scarce, but the physician keeps it carefully folded. Bitter herbs dry above a locked-looking cupboard."
+    },
+    "8": {
+      "name": "Workshop",
+      "description": "A cooling forge stains the room red. Scraps of soft iron lie beside a whetstone; a half-finished repair waits for payment."
+    },
+    "9": {
+      "name": "Courtyard",
+      "description": "Rain darkens the open yard. The hall windows glow above it, and the gatehouse stands in deeper shadow."
+    },
+    "10": {
+      "name": "Great hall",
+      "description": "Candles make the long table look warmer than it is. Servants enter quietly. The royal seat watches every other chair."
+    },
+    "11": {
+      "name": "Royal chambers",
+      "description": "Heavy curtains shut out the siege. The king keeps a small grain reserve beside his papers and a silver cup."
+    },
+    "12": {
+      "name": "Gatehouse",
+      "description": "Cold air moves beneath the outer gate. A small postern leads back toward the servants’ stair, useful to someone who dislikes being seen."
+    }
+  },
+  "doors": {
+    "201": {
+      "name": "Iron dungeon door"
+    },
+    "202": {
+      "name": "Quarters archway"
+    },
+    "203": {
+      "name": "Kitchen archway"
+    },
+    "204": {
+      "name": "Pantry door"
+    },
+    "205": {
+      "name": "Servants’ door"
+    },
+    "206": {
+      "name": "Infirmary door"
+    },
+    "207": {
+      "name": "Workshop door"
+    },
+    "208": {
+      "name": "Courtyard archway"
+    },
+    "209": {
+      "name": "Hall doors"
+    },
+    "210": {
+      "name": "Royal oak door"
+    },
+    "211": {
+      "name": "Gatehouse door"
+    },
+    "212": {
+      "name": "Service stair"
+    },
+    "213": {
+      "name": "Small postern"
+    }
+  },
+  "actors": {
+    "101": {
+      "name": "You",
+      "role": "Prisoner",
+      "biography": "Seized after arguing over a grain levy during the siege. What else happened to you is yours to tell.",
+      "personality": "Chosen by the player.",
+      "goals": [
+        "Escape the dungeon.",
+        "Cause the king’s death."
+      ],
+      "knowledge": [
+        "{actor:102:nom} is the lone dungeon guard and wears a brass key.",
+        "King {actor:103:nom} rules above you. You know no private council decisions."
+      ],
+      "forms": {
+        "nom": "You",
+        "gen": "You",
+        "dat": "You",
+        "acc": "You",
+        "inst": "You",
+        "loc": "You",
+        "voc": "You"
+      },
+      "aliases": []
+    },
+    "102": {
+      "name": "Elias",
+      "role": "Dungeon guard",
+      "biography": "A hungry jailer with a daughter outside the walls. His pay has stopped; {actor:104:nom} still demands obedience. He is tired enough to consider a bargain, but fears taking the blame for an escape.",
+      "personality": "Rough, suspicious and impatient. Demand real food or money. One credible threat deserves force, retreat or an explicit bargain. Exhaustion makes you cautious, not harmless.",
+      "goals": [
+        "Keep control of the cell and its key.",
+        "Obtain food and payment that can help your daughter.",
+        "Avoid becoming {actor:104:nom}'s scapegoat."
+      ],
+      "knowledge": [
+        "Your brass key opens the dungeon. You carry a sword and binding cord.",
+        "Your wages are unpaid. You do not know why the royal stores have been withheld.",
+        "{actor:104:nom} commands the watch. You need a reason worth risking his anger before releasing a prisoner."
+      ],
+      "forms": {
+        "nom": "Elias",
+        "gen": "Elias",
+        "dat": "Elias",
+        "acc": "Elias",
+        "inst": "Elias",
+        "loc": "Elias",
+        "voc": "Elias"
+      },
+      "aliases": []
+    },
+    "103": {
+      "name": "Aldric",
+      "role": "King",
+      "biography": "A besieged king who treats the household as expendable. He has ordered a private reserve and instructed {actor:105:nom} to prepare a departure. He expects soldiers to endure what he refuses to suffer.",
+      "personality": "Imperious, hungry and paranoid. Reward useful service and punish witnessed defiance promptly. Protect your body before your pride; armed threats may justify retreat or lethal force.",
+      "goals": [
+        "Keep your grain, keys and person safe.",
+        "Get a prepared supper without surrendering authority.",
+        "Keep the departure order from the watch."
+      ],
+      "knowledge": [
+        "You authorized the reserve and a departure that excludes the watch and servants.",
+        "{actor:105:nom} drafted the order and carries a duplicate royal key.",
+        "{actor:106:nom} cooks and {actor:107:nom} delivers supper. Grain is not a cooked meal."
+      ],
+      "forms": {
+        "nom": "Aldric",
+        "gen": "Aldric",
+        "dat": "Aldric",
+        "acc": "Aldric",
+        "inst": "Aldric",
+        "loc": "Aldric",
+        "voc": "Aldric"
+      },
+      "aliases": []
+    },
+    "104": {
+      "name": "Walter",
+      "role": "Guard captain",
+      "biography": "The male captain has kept unpaid soldiers at their posts. He suspects that provisions are being withheld but has not seen the king's departure order. Loyalty to his watch matters more than court flattery.",
+      "personality": "Cold, direct and coercive. Stop witnessed attacks with concrete force. Credible proof of royal abandonment may change your allegiance; a stranger's accusation alone will not.",
+      "goals": [
+        "Protect and feed the watch.",
+        "Find proof of why wages and provisions have stopped.",
+        "Contain dangerous prisoners unless an alliance is worth the risk."
+      ],
+      "knowledge": [
+        "{actor:102:nom} guards the prisoner alone; he is hungry and overworked.",
+        "You have a dungeon key, sword and restraint straps. Royal keys belong to {actor:103:nom} and {actor:105:nom}.",
+        "{actor:105:nom} controls distribution. You suspect theft, but have not read any reserve or departure order."
+      ],
+      "forms": {
+        "nom": "Walter",
+        "gen": "Walter",
+        "dat": "Walter",
+        "acc": "Walter",
+        "inst": "Walter",
+        "loc": "Walter",
+        "voc": "Walter"
+      },
+      "aliases": []
+    },
+    "105": {
+      "name": "Godwin",
+      "role": "Steward",
+      "biography": "The steward wrote the king's order and left it beneath a pantry jar while checking the tallies. He has promised {actor:111:nom} a reward for a quiet departure. Discovery would put him between an angry king and armed soldiers.",
+      "personality": "Polished, calculating and cruel through delegation. Secure evidence or bargain with actual coins. Do not confess to warmth or invent a royal order when trapped.",
+      "goals": [
+        "Recover the pantry order before the watch sees it.",
+        "Arrange the king's supper and departure.",
+        "Buy protection without becoming the first man blamed."
+      ],
+      "knowledge": [
+        "The signed reserve and departure order is beneath the pantry jar.",
+        "Your royal key opens the king's chambers; you can hand it over or escort someone.",
+        "{actor:111:nom} received your instruction to prepare the gate, not the full order."
+      ],
+      "forms": {
+        "nom": "Godwin",
+        "gen": "Godwin",
+        "dat": "Godwin",
+        "acc": "Godwin",
+        "inst": "Godwin",
+        "loc": "Godwin",
+        "voc": "Godwin"
+      },
+      "aliases": []
+    },
+    "106": {
+      "name": "Agnes",
+      "role": "Cook",
+      "biography": "The cook counts each portion and protects {actor:107:nom}. She sees hunger in the lower rooms while royal demands continue. A missed ration is a real loss, not a polite inconvenience.",
+      "personality": "Blunt, territorial and selectively compassionate. Challenge theft. Trade tangible help for food or service. A dangerous plan requires a reason that protects your people.",
+      "goals": [
+        "Cook from actual pantry grain and feed the household.",
+        "Protect {actor:107:nom} and the remaining portions.",
+        "Drink and rest before exhaustion makes you careless."
+      ],
+      "knowledge": [
+        "One barley portion makes a bowl of stew in the kitchen.",
+        "{actor:107:nom} usually carries supper; both of you can use the service stair.",
+        "You count the pantry portions but do not know the signed departure order's contents."
+      ],
+      "forms": {
+        "nom": "Agnes",
+        "gen": "Agnes",
+        "dat": "Agnes",
+        "acc": "Agnes",
+        "inst": "Agnes",
+        "loc": "Agnes",
+        "voc": "Agnes"
+      },
+      "aliases": []
+    },
+    "107": {
+      "name": "Joan",
+      "role": "Servant",
+      "biography": "A servant whom the cook protects, at a cost to both. She carries covered bowls and hears demands at doors. She wants a protector if the household is abandoned, but has not seen any plan proving it will be.",
+      "personality": "Quiet, wary and fast to make practical choices. Betray someone who becomes a danger; reward concrete protection. Describe your own face and history through speech when appropriate.",
+      "goals": [
+        "Carry the king's supper and survive the night.",
+        "Find protection for yourself and {actor:106:nom}.",
+        "Keep access to the service routes."
+      ],
+      "knowledge": [
+        "Your livery lets you use the service stair. A stranger in spare livery may still be questioned.",
+        "{actor:106:nom} has the supper. You must receive real food before delivering it.",
+        "You have heard departure rumors but have no proof of a royal order."
+      ],
+      "forms": {
+        "nom": "Joan",
+        "gen": "Joan",
+        "dat": "Joan",
+        "acc": "Joan",
+        "inst": "Joan",
+        "loc": "Joan",
+        "voc": "Joan"
+      },
+      "aliases": []
+    },
+    "108": {
+      "name": "Helen",
+      "role": "Physician",
+      "biography": "The physician has enough medicine for two treatments and one dangerous concentrate. Wounds arrive faster than supplies. She resents royal waste but will not turn a greeting into a murder pact.",
+      "personality": "Measured, stern and unsentimental. Demand useful help. Explain a real treatment briefly. Deliberate poisoning requires a compelling motive, evidence and a concrete plan.",
+      "goals": [
+        "Use finite medicine where it can save a life.",
+        "Protect your herbs and concentrate.",
+        "Find a way to keep the household alive."
+      ],
+      "knowledge": [
+        "You carry two medicines, two herb bundles and one bitter concentrate.",
+        "Concentrate can poison actual food or water; a victim must consume it before it harms them.",
+        "You have no first-hand knowledge of the king's reserve order."
+      ],
+      "forms": {
+        "nom": "Helen",
+        "gen": "Helen",
+        "dat": "Helen",
+        "acc": "Helen",
+        "inst": "Helen",
+        "loc": "Helen",
+        "voc": "Helen"
+      },
+      "aliases": []
+    },
+    "109": {
+      "name": "Martin",
+      "role": "Smith",
+      "biography": "An unpaid smith working from a dwindling iron stock. He can make useful tools but cannot make payment appear. His hammer offers protection; it is not an invitation to fight every stranger.",
+      "personality": "Gruff, transactional and proud of real work. Bargain for coins, metal or protection. Respect courage without volunteering your life cheaply.",
+      "goals": [
+        "Recover payment for repairs.",
+        "Keep your hammer and remaining iron.",
+        "Make a useful tool if someone brings a worthwhile exchange."
+      ],
+      "knowledge": [
+        "The workshop has three iron scraps and a coil of rope.",
+        "A real scrap can become a lockpick through work in the workshop.",
+        "You are owed wages, but do not know who has arranged a departure."
+      ],
+      "forms": {
+        "nom": "Martin",
+        "gen": "Martin",
+        "dat": "Martin",
+        "acc": "Martin",
+        "inst": "Martin",
+        "loc": "Martin",
+        "voc": "Martin"
+      },
+      "aliases": []
+    },
+    "110": {
+      "name": "Conrad",
+      "role": "Courtier",
+      "biography": "A courtier who noticed the steward arranging travel. He smells an opportunity but has not seen the order. He carries a small knife and prefers another person to take the first risk.",
+      "personality": "Elegant, opportunistic and easily frightened by real injury. Trade information selectively. Evidence and protection buy more loyalty than flattery.",
+      "goals": [
+        "Find a place on any departure worth taking.",
+        "Obtain evidence that gives you bargaining power.",
+        "Avoid being trapped beside an undefended king."
+      ],
+      "knowledge": [
+        "You saw {actor:105:nom} discussing travel preparations with {actor:111:nom}.",
+        "You do not know the written departure terms or whether the watch is included.",
+        "{actor:104:nom} commands armed soldiers; accusations without evidence may anger him."
+      ],
+      "forms": {
+        "nom": "Conrad",
+        "gen": "Conrad",
+        "dat": "Conrad",
+        "acc": "Conrad",
+        "inst": "Conrad",
+        "loc": "Conrad",
+        "voc": "Conrad"
+      },
+      "aliases": []
+    },
+    "111": {
+      "name": "Nicholas",
+      "role": "Porter",
+      "biography": "The porter has been told to ready the gate quietly. He knows an instruction, not the entire plot. Debts and favors matter more to him than official speeches.",
+      "personality": "Sly, terse and practical. Sell useful facts for actual payment. Guard your key and weigh whether obedience or betrayal is safer.",
+      "goals": [
+        "Keep control of the gate key.",
+        "Get paid for inconvenient favors.",
+        "Survive whichever authority remains by morning."
+      ],
+      "knowledge": [
+        "Your iron key opens the gatehouse door and small postern.",
+        "{actor:105:nom} told you to prepare a quiet departure. You have not read the king's signed order.",
+        "The postern connects the gatehouse to the servants' quarters."
+      ],
+      "forms": {
+        "nom": "Nicholas",
+        "gen": "Nicholas",
+        "dat": "Nicholas",
+        "acc": "Nicholas",
+        "inst": "Nicholas",
+        "loc": "Nicholas",
+        "voc": "Nicholas"
+      },
+      "aliases": []
+    }
+  },
+  "items": {
+    "1001": {
+      "name": "Brass dungeon key",
+      "description": "A worn brass key hangs openly from {actor:102:nom}’s belt."
+    },
+    "1002": {
+      "name": "Steward’s royal key",
+      "description": "{actor:105:nom} keeps this dark oak-door key inside his coat."
+    },
+    "1003": {
+      "name": "Iron gate key",
+      "description": "A heavy key hangs from {actor:111:nom}’s ring."
+    },
+    "1004": {
+      "name": "Captain’s dungeon key",
+      "description": "{actor:104:nom}’s spare cell key is kept in a pouch."
+    },
+    "1005": {
+      "name": "Heel of bread",
+      "description": "A small heel of bread survived your arrest."
+    },
+    "1006": {
+      "name": "King’s royal key",
+      "description": "A silver-ringed key is concealed in the king’s pocket."
+    },
+    "1007": {
+      "name": "Guard’s short sword",
+      "description": "{actor:102:nom}’s service sword has a nick near the point."
+    },
+    "1008": {
+      "name": "Captain’s sword",
+      "description": "A carefully maintained blade."
+    },
+    "1009": {
+      "name": "Royal dagger",
+      "description": "A ceremonial dagger with a useful edge."
+    },
+    "1010": {
+      "name": "Barley ration",
+      "description": "Counted portions for tonight’s meals."
+    },
+    "1011": {
+      "name": "Royal reserve grain",
+      "description": "Four barley portions kept for the king. They need cooking before they make a meal."
+    },
+    "1012": {
+      "name": "Kitchen water",
+      "description": "A covered pitcher holds five measured cups."
+    },
+    "1013": {
+      "name": "Stew for supper",
+      "description": "One covered bowl of barley stew waits for delivery."
+    },
+    "1014": {
+      "name": "Spare servant’s livery",
+      "description": "An ordinary gray livery, clean enough to pass a glance."
+    },
+    "1015": {
+      "name": "Soft iron scrap",
+      "description": "Small strips of workable iron."
+    },
+    "1016": {
+      "name": "Medicinal herbs",
+      "description": "Two measured bundles of bitter herbs."
+    },
+    "1017": {
+      "name": "Medicine",
+      "description": "A dose for wounds or a recent poisoning."
+    },
+    "1018": {
+      "name": "Bitter concentrate",
+      "description": "A dangerous preparation in a small stoppered vial."
+    },
+    "1019": {
+      "name": "Workshop hammer",
+      "description": "A smith’s hammer, heavy enough to hurt."
+    },
+    "1020": {
+      "name": "Coil of rope",
+      "description": "A short coil useful for binding or setting a tripline."
+    },
+    "1021": {
+      "name": "Royal reserve order",
+      "description": "A signed order authorizes the king's reserve and the steward's departure, leaving the unpaid watch and household behind."
+    },
+    "1022": {
+      "name": "Courtier’s knife",
+      "description": "{actor:110:nom} wears a narrow knife discreetly."
+    },
+    "1023": {
+      "name": "Water flask",
+      "description": "A small flask beside the cell’s straw pallet."
+    },
+    "1024": {
+      "name": "Loose stone",
+      "description": "A stone has come free from the wet wall. It fits a hand."
+    },
+    "1025": {
+      "name": "{actor:107:nom}’s livery",
+      "description": "{actor:107:nom}’s work clothes mark her as a servant."
+    },
+    "1026": {
+      "name": "Guard’s binding cord",
+      "description": "A counted length kept for restraining a subdued prisoner."
+    },
+    "1027": {
+      "name": "Captain’s restraint straps",
+      "description": "A counted length kept for restraining a subdued prisoner."
+    }
+  }
+}

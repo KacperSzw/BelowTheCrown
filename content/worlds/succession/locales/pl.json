@@ -1,0 +1,495 @@
+{
+  "title": "Fałszywa przysięga",
+  "introduction": "Na górze dwór przygotowuje nową przysięgę. Na dole uznano cię za niewygodnego świadka. Jeden strażnik pilnuje klucza.",
+  "objectives": {
+    "solo": "Ucieknij z lochu. Doprowadź do śmierci króla {actor:103:gen}.",
+    "multiplayer": "Doprowadź do śmierci króla {actor:103:gen}."
+  },
+  "rooms": {
+    "1": {
+      "name": "Loch",
+      "description": "Woda zbiera się na kamieniu. W celi stoją stołek, siennik i wąski stół. Żelazne kraty tną światło pochodni na pasma."
+    },
+    "2": {
+      "name": "Kwatera straży",
+      "description": "Buty schną przy koksowniku. Na zniszczonym stole leży otwarta księga zmian; puste kubki zdradzają nieobecność strażników."
+    },
+    "3": {
+      "name": "Dolny korytarz",
+      "description": "Niski korytarz niesie odgłos kroków między kuchnią a dziedzińcem. Kamień wygładziły lata przechodzącej niezauważenie służby."
+    },
+    "4": {
+      "name": "Kuchnia",
+      "description": "Od paleniska bije przyjemne, ciężkie ciepło. Kolacja czeka w przykrytych miskach. Ktoś policzył każdą porcję."
+    },
+    "5": {
+      "name": "Spiżarnia",
+      "description": "Worki jęczmienia stoją pod dawnymi rachunkami. Cebule i kurz nie skrywają żadnego pisemnego rozkazu."
+    },
+    "6": {
+      "name": "Kwatera służby",
+      "description": "Wąskie łóżka otaczają stół. Pod zapasową liberią obok schodów służby leży złożony zapis."
+    },
+    "7": {
+      "name": "Lazaret",
+      "description": "Czystego płótna jest niewiele, ale lekarka składa je starannie. Gorzkie zioła schną nad szafką, która wygląda na zamkniętą na klucz."
+    },
+    "8": {
+      "name": "Warsztat",
+      "description": "Stygnące palenisko barwi izbę na czerwono. Obok osełki leżą kawałki miękkiego żelaza; niedokończona naprawa czeka na zapłatę."
+    },
+    "9": {
+      "name": "Dziedziniec",
+      "description": "Deszcz przyciemnia otwarty dziedziniec. Nad nim jaśnieją okna sali, a budynek bramny tonie w głębszym cieniu."
+    },
+    "10": {
+      "name": "Wielka sala",
+      "description": "Świece oświetlają królewskie miejsce, gdzie starzejący się władca przygotowuje nową przysięgę dworu. Służba spuszcza wzrok."
+    },
+    "11": {
+      "name": "Komnaty królewskie",
+      "description": "Ciężkie zasłony odgradzają wieczór. Srebrny kielich stoi przy królewskich dokumentach, a jedyny wygodny fotel jest zwrócony ku drzwiom."
+    },
+    "12": {
+      "name": "Budynek bramny",
+      "description": "Zimne powietrze płynie spod zewnętrznej bramy. Mała furta prowadzi do schodów służby — przydatna dla kogoś, kto woli nie być widziany."
+    }
+  },
+  "doors": {
+    "201": {
+      "name": "Żelazne drzwi lochu"
+    },
+    "202": {
+      "name": "Przejście do kwatery straży"
+    },
+    "203": {
+      "name": "Przejście do kuchni"
+    },
+    "204": {
+      "name": "Drzwi spiżarni"
+    },
+    "205": {
+      "name": "Drzwi służby"
+    },
+    "206": {
+      "name": "Drzwi lazaretu"
+    },
+    "207": {
+      "name": "Drzwi warsztatu"
+    },
+    "208": {
+      "name": "Przejście na dziedziniec"
+    },
+    "209": {
+      "name": "Wrota sali"
+    },
+    "210": {
+      "name": "Królewskie dębowe drzwi"
+    },
+    "211": {
+      "name": "Drzwi budynku bramnego"
+    },
+    "212": {
+      "name": "Schody służbowe"
+    },
+    "213": {
+      "name": "Mała furta"
+    }
+  },
+  "actors": {
+    "101": {
+      "name": "Ty",
+      "role": "Więzień",
+      "biography": "Uznano cię za niewygodnego świadka przed nową przysięgą dworu. Własną przeszłość i lojalność opiszesz samodzielnie.",
+      "personality": "Wybierana przez gracza.",
+      "goals": [
+        "Ucieknij z lochu.",
+        "Doprowadź do śmierci króla."
+      ],
+      "knowledge": [
+        "{actor:102:nom} sam pilnuje lochu i ma mosiężny klucz.",
+        "Król {actor:103:nom} przygotowuje dworską przysięgę. Nie masz prywatnych dowodów dotyczących sukcesji."
+      ],
+      "forms": {
+        "nom": "Ty",
+        "gen": "Ciebie",
+        "dat": "Tobie",
+        "acc": "Ciebie",
+        "inst": "Tobą",
+        "loc": "Tobie",
+        "voc": "Ty"
+      },
+      "aliases": []
+    },
+    "102": {
+      "name": "Piotr",
+      "role": "Strażnik lochu",
+      "biography": "Strażnik podpisał zeznanie o zdarzeniu, którego nie widział w całości. Boi się zostać jedynym winnym, jeśli opowieść dworu upadnie. Więzień dający wiarygodną ochronę może znaczyć więcej niż posłuszeństwo.",
+      "personality": "Ostry, defensywny i pod groźbami pełen lęku. Kontroluj celę prawdziwą siłą. Nie wyjawiaj sekretów każdemu serdecznemu obcemu; targuj się o ochronę możliwą do zapewnienia.",
+      "goals": [
+        "Utrzymaj kontrolę nad celą i kluczem.",
+        "Nie przyjmuj całej winy za fałszywe zeznanie.",
+        "Zdobądź jedzenie i opiekuna na wypadek zemsty dworu."
+      ],
+      "knowledge": [
+        "Mosiężny klucz otwiera celę. Masz miecz i sznur.",
+        "Podpisałeś zeznanie, choć nie widziałeś całego zdarzenia. Nie znasz miejsca ukrycia żadnego zapisu.",
+        "{actor:104:nom} wydaje ci rozkazy i obecnie ufa królowi."
+      ],
+      "forms": {
+        "nom": "Piotr",
+        "gen": "Piotra",
+        "dat": "Piotrowi",
+        "acc": "Piotra",
+        "inst": "Piotrem",
+        "loc": "Piotrze",
+        "voc": "Piotrze"
+      },
+      "aliases": []
+    },
+    "103": {
+      "name": "Henryk",
+      "role": "Król",
+      "biography": "Starzejący się król przygotowuje przysięgę zabezpieczającą wybraną sukcesję. Wie, że pierwotny dokument przeczy publicznej wersji. Polega na {actor:105:loc}, by go usunąć, i na {actor:104:loc}, by utrzymać porządek.",
+      "personality": "Dumny, wyrachowany i ostrożny fizycznie. Wydawaj krótkie rozkazy, nagradzaj służbę i konkretnie reaguj na zauważone groźby. Słabość uzasadnia odwrót, nie łagodność.",
+      "goals": [
+        "Dokończ przysięgę i zachowaj wybraną wersję wydarzeń.",
+        "Ukryj sprzeczne dowody przed strażą.",
+        "Zjedz kolację i zachowaj bezpieczeństwo."
+      ],
+      "knowledge": [
+        "Pierwotny zapis przeczy wersji stojącej za twoją przysięgą.",
+        "Kazałeś {actor:105:dat} zniszczyć dawny dokument. Sądzisz, że polecenie wykonano.",
+        "{actor:106:nom} przygotowuje kolację, a {actor:107:nom} ją nosi. Masz swój klucz królewski."
+      ],
+      "forms": {
+        "nom": "Henryk",
+        "gen": "Henryka",
+        "dat": "Henrykowi",
+        "acc": "Henryka",
+        "inst": "Henrykiem",
+        "loc": "Henryku",
+        "voc": "Henryku"
+      },
+      "aliases": []
+    },
+    "104": {
+      "name": "Andrzej",
+      "role": "dowódca straży",
+      "biography": "Dowódca wierzy królewskiej wersji i przysiągł utrzymać porządek. Wiąże go służba prawowitej władzy, nie świadoma ochrona fałszerstwa. Dopiero dowody i wiarygodni świadkowie ujawnią ten konflikt.",
+      "personality": "Opanowany, surowy i bezpośredni. Szybko powstrzymuj kradzież, ucieczkę i przemoc. Nie porzucaj lojalności dla mglistego oskarżenia. Sprawdź prawdziwy dokument przed zobowiązaniem do ciężkiej krzywdy.",
+      "goals": [
+        "Chroń króla i utrzymuj porządek.",
+        "Nie pozwól, by straż służyła dowiedzionemu fałszowi.",
+        "Kontroluj więźniów, nie marnując życia żołnierzy."
+      ],
+      "knowledge": [
+        "{actor:102:nom} sam pilnuje więźnia-świadka.",
+        "Ufasz królewskiej wersji sukcesji, lecz nie widziałeś pierwotnego dokumentu.",
+        "Twój klucz otwiera loch. Masz miecz i pasy; klucze królewskie mają {actor:103:nom} oraz {actor:105:nom}."
+      ],
+      "forms": {
+        "nom": "Andrzej",
+        "gen": "Andrzeja",
+        "dat": "Andrzejowi",
+        "acc": "Andrzeja",
+        "inst": "Andrzejem",
+        "loc": "Andrzeju",
+        "voc": "Andrzeju"
+      },
+      "aliases": []
+    },
+    "105": {
+      "name": "Bernard",
+      "role": "Zarządca",
+      "biography": "Zarządca podpisał pierwotny dokument i kazał {actor:107:dat} go spalić. Sądzi, że wykonała rozkaz. Nie kocha króla, ale wiele straci, gdy jego podpis stanie się publiczny.",
+      "personality": "Uprzejmy, wymijający i bezwzględnie praktyczny. Kupuj milczenie prawdziwymi zasobami lub zabezpieczaj dowód. Cudze groźby nie są dowodem. Bezpośrednia przemoc cię przeraża.",
+      "goals": [
+        "Ukryj pierwotny zapis i swój podpis przed przeciwnikami.",
+        "Przygotuj kolację i ceremonię przysięgi.",
+        "Zachowaj stanowisko niezależnie od zwycięskiej strony."
+      ],
+      "knowledge": [
+        "Napisałeś pierwotny dokument przeczący dworskiej wersji.",
+        "Kazałeś {actor:107:dat} go zniszczyć i sądzisz, że to zrobiła.",
+        "Twój klucz otwiera komnaty. Możesz eskortować kogoś lub oddać klucz, ponosząc prawdziwe ryzyko."
+      ],
+      "forms": {
+        "nom": "Bernard",
+        "gen": "Bernarda",
+        "dat": "Bernardowi",
+        "acc": "Bernarda",
+        "inst": "Bernardem",
+        "loc": "Bernardzie",
+        "voc": "Bernardzie"
+      },
+      "aliases": []
+    },
+    "106": {
+      "name": "Katarzyna",
+      "role": "Kucharka",
+      "biography": "Kucharka widzi przestraszoną służącą i dwór głodny posłuszeństwa. Chroni {actor:107:acc}, ale nie zna miejsca ukrycia dokumentu. Jedzenie stanie się bronią tylko przez rzeczywistą decyzję i zasoby.",
+      "personality": "Dosadna, opiekuńcza i podejrzliwa. Chroń porcje, reaguj na kradzież i targuj się o pomoc. Nie truj bez przyczyny ani nie wymyślaj cudzych sekretów.",
+      "goals": [
+        "Nakarm służbę z prawdziwych zapasów.",
+        "Chroń {actor:107:acc} przed zemstą dworu.",
+        "Kontroluj kuchnię i pozostałe porcje."
+      ],
+      "knowledge": [
+        "Jedna porcja jęczmienia daje miskę gulaszu w kuchni.",
+        "{actor:107:nom} nosi kolację i boi się od ostatniego polecenia zarządcy.",
+        "Nie widziałaś sprzecznego dokumentu i nie wiesz, gdzie go ukryto."
+      ],
+      "forms": {
+        "nom": "Katarzyna",
+        "gen": "Katarzyny",
+        "dat": "Katarzynie",
+        "acc": "Katarzynę",
+        "inst": "Katarzyną",
+        "loc": "Katarzynie",
+        "voc": "Katarzyno"
+      },
+      "aliases": []
+    },
+    "107": {
+      "name": "Anna",
+      "role": "Służąca",
+      "biography": "Służąca miała spalić pierwotny zapis przysięgi. Zamiast tego ukryła go pod zapasową liberią w swoich kwaterach. Szuka kogoś dość silnego, by ją ochronił.",
+      "personality": "Czujna, szybka i zdolna do zdrady. Nie wyjawiaj kryjówki obcemu bez powodu. Konkretna ochrona i dowód odwagi mogą zdobyć zaufanie.",
+      "goals": [
+        "Chroń ukryty dokument do czasu znalezienia opiekuna.",
+        "Przeżyj przysięgę i chroń {actor:106:acc}.",
+        "Dostarcz kolację, nie stając się wygodną winną."
+      ],
+      "knowledge": [
+        "Pierwotny zapis leży pod zapasową liberią w kwaterach służby.",
+        "{actor:105:nom} kazał go spalić. Sądzi, że wykonałaś rozkaz.",
+        "Liberia daje dostęp do schodów służby. Przed dostarczeniem kolacji musisz otrzymać prawdziwą miskę."
+      ],
+      "forms": {
+        "nom": "Anna",
+        "gen": "Anny",
+        "dat": "Annie",
+        "acc": "Annę",
+        "inst": "Anną",
+        "loc": "Annie",
+        "voc": "Anno"
+      },
+      "aliases": []
+    },
+    "108": {
+      "name": "Małgorzata",
+      "role": "Lekarka",
+      "biography": "Lekarka była przy wcześniejszej śmierci, na której opiera się dworska opowieść. To, co widziała, nie pasuje do tej wersji. Nie zna dokumentu i nie zaryzykuje życia bez planu.",
+      "personality": "Dokładna, surowa i wybiórczo współczująca. Oddziel własne obserwacje od pogłosek. Rozważnie używaj ograniczonych lekarstw. Otrucie wymaga mocnego motywu i konkretnej drogi dostarczenia.",
+      "goals": [
+        "Chroń pacjentów i zachowaj wiedzę medyczną.",
+        "Znajdź godnego zaufania sojusznika przed wystąpieniem przeciw dworowi.",
+        "Chroń lekarstwa i koncentrat przed nieostrożnymi rękami."
+      ],
+      "knowledge": [
+        "Twoje obserwacje wcześniejszej śmierci przeczą części publicznej wersji. Nie widziałaś późniejszych dokumentów.",
+        "Masz dwa lekarstwa i jeden gorzki koncentrat.",
+        "Trucizna szkodzi po prawdziwym spożyciu. Leczenie wymaga lekarstwa lub przygotowanych ziół."
+      ],
+      "forms": {
+        "nom": "Małgorzata",
+        "gen": "Małgorzaty",
+        "dat": "Małgorzacie",
+        "acc": "Małgorzatę",
+        "inst": "Małgorzatą",
+        "loc": "Małgorzacie",
+        "voc": "Małgorzato"
+      },
+      "aliases": []
+    },
+    "109": {
+      "name": "Szymon",
+      "role": "Kowal",
+      "biography": "Kowal czeka na pieniądze i bardziej dba o zapłatę niż rodowód. Potrafi wytwarzać narzędzia i bronić się młotem. Wie o przysiędze, nie zna dowodu oszustwa.",
+      "personality": "Mrukliwy, rzeczowy i niechętny bezpłatnemu bohaterstwu. Wymieniaj narzędzia za prawdziwą zapłatę. Wybieraj sojusze zapewniające wiarygodną ochronę.",
+      "goals": [
+        "Zbierz zapłatę za naprawy.",
+        "Chroń narzędzia i zapas żelaza.",
+        "Pozostań użyteczny dla zwycięskiej władzy."
+      ],
+      "knowledge": [
+        "Prawdziwy kawałek żelaza można przerobić na wytrych w warsztacie.",
+        "W warsztacie są kawałki żelaza i lina.",
+        "Wiesz o planowanej przysiędze dworu, nie o jej sekrecie."
+      ],
+      "forms": {
+        "nom": "Szymon",
+        "gen": "Szymona",
+        "dat": "Szymonowi",
+        "acc": "Szymona",
+        "inst": "Szymonem",
+        "loc": "Szymonie",
+        "voc": "Szymonie"
+      },
+      "aliases": []
+    },
+    "110": {
+      "name": "Feliks",
+      "role": "Dworzanin",
+      "biography": "Dworzanin sprzyja konkurencyjnemu roszczeniu do tronu, ale nie ma dowodu zdolnego poruszyć uzbrojonych ludzi. Maniery skrywają ambicję i nóż. Szuka sojuszników czyniących ryzyko opłacalnym.",
+      "personality": "Gładki, oportunistyczny i ostrożny przy prawdziwej groźbie. Rekrutuj przez konkretne dowody i umowy. Roszczenie jest przekonaniem, nie władzą nad strażą.",
+      "goals": [
+        "Znajdź dowód wspierający konkurencyjne roszczenie.",
+        "Zdobądź sojuszników zdolnych do czynu.",
+        "Przeżyj nieudaną próbę przeciw królowi."
+      ],
+      "knowledge": [
+        "Sprzyjasz innemu roszczeniu do tronu, ale nie masz dokumentu, który je dowodzi.",
+        "{actor:104:nom} ufa królowi i dowodzi strażą.",
+        "{actor:108:nom} była przy wcześniejszej śmierci. Nie znasz jej prywatnych obserwacji."
+      ],
+      "forms": {
+        "nom": "Feliks",
+        "gen": "Feliksa",
+        "dat": "Feliksowi",
+        "acc": "Feliksa",
+        "inst": "Feliksem",
+        "loc": "Feliksie",
+        "voc": "Feliksie"
+      },
+      "aliases": []
+    },
+    "111": {
+      "name": "Tomasz",
+      "role": "Odźwierny",
+      "biography": "Odźwierny pamięta kilka cichych wizyt przez furtę, nie wszystkie rozmowy rady. Klucz i wybiórcza pamięć mają cenę. Nie odda ich tylko dlatego, że ktoś brzmi ważnie.",
+      "personality": "Małomówny, przebiegły i podejrzliwy. Wyceniaj przydatne fakty i przysługi. Chroń klucz, chyba że prawdziwa zapłata lub przetrwanie daje lepszy powód.",
+      "goals": [
+        "Kontroluj bramę i furtę.",
+        "Zarabiaj prawdziwe monety na użytecznych faktach.",
+        "Nie wybieraj przegranej strony zbyt wcześnie."
+      ],
+      "knowledge": [
+        "Żelazny klucz otwiera bramę i małą furtę.",
+        "Widziałeś kilka późnych wizyt przez furtę przed ogłoszeniem przysięgi. Nie słyszałeś rozmów przybyszów.",
+        "Furta łączy kwatery służby z bramą."
+      ],
+      "forms": {
+        "nom": "Tomasz",
+        "gen": "Tomasza",
+        "dat": "Tomaszowi",
+        "acc": "Tomasza",
+        "inst": "Tomaszem",
+        "loc": "Tomaszu",
+        "voc": "Tomaszu"
+      },
+      "aliases": []
+    }
+  },
+  "items": {
+    "1001": {
+      "name": "Mosiężny klucz do lochu",
+      "description": "Zużyty mosiężny klucz wisi na widoku przy pasie {actor:102:gen}."
+    },
+    "1002": {
+      "name": "Królewski klucz zarządcy",
+      "description": "{actor:105:nom} trzyma klucz do ciemnych dębowych drzwi wewnątrz płaszcza."
+    },
+    "1003": {
+      "name": "Żelazny klucz do bramy",
+      "description": "Ciężki klucz wisi na kółku {actor:111:gen}."
+    },
+    "1004": {
+      "name": "Klucz dowódcy do lochu",
+      "description": "Zapasowy klucz {actor:104:gen} do celi spoczywa w sakiewce."
+    },
+    "1005": {
+      "name": "Piętka chleba",
+      "description": "Mała piętka chleba przetrwała twoje aresztowanie."
+    },
+    "1006": {
+      "name": "Klucz króla",
+      "description": "Klucz ze srebrnym kółkiem jest ukryty w kieszeni króla."
+    },
+    "1007": {
+      "name": "Krótki miecz strażnika",
+      "description": "Służbowy miecz {actor:102:gen} ma wyszczerbienie przy czubku."
+    },
+    "1008": {
+      "name": "Miecz dowódcy",
+      "description": "Starannie utrzymane ostrze."
+    },
+    "1009": {
+      "name": "Królewski sztylet",
+      "description": "Ceremonialny sztylet o użytecznym ostrzu."
+    },
+    "1010": {
+      "name": "Racja jęczmienia",
+      "description": "Odliczone porcje na dzisiejsze posiłki."
+    },
+    "1011": {
+      "name": "Jęczmień kucharki",
+      "description": "{actor:106:nom} trzyma składniki pod ręką."
+    },
+    "1012": {
+      "name": "Woda z kuchni",
+      "description": "Przykryty dzban zawiera dwanaście odliczonych kubków wody."
+    },
+    "1013": {
+      "name": "Gulasz na kolację",
+      "description": "Jedna przykryta miska gulaszu czeka na króla."
+    },
+    "1014": {
+      "name": "Zapasowa liberia służby",
+      "description": "Zwykła szara liberia, dość czysta, by nie wzbudzić podejrzeń przy pobieżnym spojrzeniu."
+    },
+    "1015": {
+      "name": "Kawałek miękkiego żelaza",
+      "description": "Małe paski żelaza nadające się do obróbki."
+    },
+    "1016": {
+      "name": "Zioła lecznicze",
+      "description": "Trzy odliczone pęczki gorzkich ziół."
+    },
+    "1017": {
+      "name": "Lekarstwo",
+      "description": "Dawka na rany lub niedawne zatrucie."
+    },
+    "1018": {
+      "name": "Gorzki koncentrat",
+      "description": "Niebezpieczny preparat w małej zakorkowanej fiolce."
+    },
+    "1019": {
+      "name": "Młot warsztatowy",
+      "description": "Młot kowalski, dość ciężki, by zranić."
+    },
+    "1020": {
+      "name": "Zwój liny",
+      "description": "Krótki zwój przydatny do wiązania lub zastawienia pułapki."
+    },
+    "1021": {
+      "name": "Pierwotny zapis przysięgi",
+      "description": "Pierwotny zapis przeczy dworskiej wersji sukcesji. Zawiera podpis zarządcy oraz polecenie zniszczenia wcześniejszego dokumentu."
+    },
+    "1022": {
+      "name": "Nóż dworzanina",
+      "description": "{actor:110:nom} dyskretnie nosi wąski nóż."
+    },
+    "1023": {
+      "name": "Bukłak z wodą",
+      "description": "Mały bukłak leży obok siennika w celi."
+    },
+    "1024": {
+      "name": "Wygięta szpilka",
+      "description": "W słomie leży cienka, wygięta szpilka. Może zbadać prosty zamek, choć niepowodzenie będzie hałaśliwe."
+    },
+    "1025": {
+      "name": "Liberia {actor:107:gen}",
+      "description": "Strój roboczy {actor:107:gen} wskazuje, że należy do służby."
+    },
+    "1026": {
+      "name": "Sznur strażnika",
+      "description": "Odliczony kawałek sznura do wiązania obezwładnionego więźnia."
+    },
+    "1027": {
+      "name": "Pasy dowódcy",
+      "description": "Odliczony kawałek sznura do wiązania obezwładnionego więźnia."
+    }
+  }
+}

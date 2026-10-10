@@ -1,0 +1,7 @@
+/target/
+/dist/
+/.castle/
+/.release/
+*.sqlite*
+*.log
+.env

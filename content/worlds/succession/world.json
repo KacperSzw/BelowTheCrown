@@ -1,0 +1,1414 @@
+{
+  "title": "The False Oath",
+  "introduction": "Upstairs, the court prepares a new oath. Below, you have been named an inconvenient witness. One guard keeps the key.",
+  "time": 64800,
+  "rooms": [
+    {
+      "id": 1,
+      "name": "Dungeon",
+      "description": "Water beads on the stone. A stool, a straw pallet, and a narrow table occupy the cell. Iron bars cut the torchlight into strips.",
+      "cover": true,
+      "prison": true
+    },
+    {
+      "id": 2,
+      "name": "Guard quarters",
+      "description": "Boots dry beside a brazier. A shift ledger lies open on a scarred table; empty mugs mark the absent watch.",
+      "cover": true,
+      "prison": false
+    },
+    {
+      "id": 3,
+      "name": "Lower passage",
+      "description": "A low passage carries footsteps between the kitchens and the yard. The stone is worn smooth by years of servants passing unseen.",
+      "cover": false,
+      "prison": false
+    },
+    {
+      "id": 4,
+      "name": "Kitchen",
+      "description": "The hearth gives off a thick, welcome heat. Supper waits in covered bowls, and someone has counted every portion.",
+      "cover": true,
+      "prison": false
+    },
+    {
+      "id": 5,
+      "name": "Pantry",
+      "description": "Sacks of barley stand beneath old tallies. The onions and dust hide no written order.",
+      "cover": true,
+      "prison": false
+    },
+    {
+      "id": 6,
+      "name": "Servants’ quarters",
+      "description": "Narrow beds surround a table. A folded memorandum lies beneath a spare livery beside the service stair.",
+      "cover": true,
+      "prison": false
+    },
+    {
+      "id": 7,
+      "name": "Infirmary",
+      "description": "Clean linen is scarce, but the physician keeps it carefully folded. Bitter herbs dry above a locked-looking cupboard.",
+      "cover": false,
+      "prison": false
+    },
+    {
+      "id": 8,
+      "name": "Workshop",
+      "description": "A cooling forge stains the room red. Scraps of soft iron lie beside a whetstone; a half-finished repair waits for payment.",
+      "cover": true,
+      "prison": false
+    },
+    {
+      "id": 9,
+      "name": "Courtyard",
+      "description": "Rain darkens the open yard. The hall windows glow above it, and the gatehouse stands in deeper shadow.",
+      "cover": false,
+      "prison": false
+    },
+    {
+      "id": 10,
+      "name": "Great hall",
+      "description": "Candles light the royal seat, where the aging king prepares his court's new oath. Servants keep their eyes down.",
+      "cover": true,
+      "prison": false
+    },
+    {
+      "id": 11,
+      "name": "Royal chambers",
+      "description": "Heavy curtains keep out the evening. A silver cup sits beside the king’s papers, and the only comfortable chair faces the door.",
+      "cover": true,
+      "prison": false
+    },
+    {
+      "id": 12,
+      "name": "Gatehouse",
+      "description": "Cold air moves beneath the outer gate. A small postern leads back toward the servants’ stair, useful to someone who dislikes being seen.",
+      "cover": true,
+      "prison": false
+    }
+  ],
+  "doors": [
+    {
+      "id": 201,
+      "name": "Iron dungeon door",
+      "rooms": [
+        1,
+        2
+      ],
+      "flags": 6,
+      "lock": "dungeon",
+      "restricted": false
+    },
+    {
+      "id": 202,
+      "name": "Quarters archway",
+      "rooms": [
+        2,
+        3
+      ],
+      "flags": 1,
+      "lock": null,
+      "restricted": false
+    },
+    {
+      "id": 203,
+      "name": "Kitchen archway",
+      "rooms": [
+        3,
+        4
+      ],
+      "flags": 1,
+      "lock": null,
+      "restricted": false
+    },
+    {
+      "id": 204,
+      "name": "Pantry door",
+      "rooms": [
+        4,
+        5
+      ],
+      "flags": 0,
+      "lock": null,
+      "restricted": false
+    },
+    {
+      "id": 205,
+      "name": "Servants’ door",
+      "rooms": [
+        4,
+        6
+      ],
+      "flags": 1,
+      "lock": null,
+      "restricted": false
+    },
+    {
+      "id": 206,
+      "name": "Infirmary door",
+      "rooms": [
+        3,
+        7
+      ],
+      "flags": 1,
+      "lock": null,
+      "restricted": false
+    },
+    {
+      "id": 207,
+      "name": "Workshop door",
+      "rooms": [
+        9,
+        8
+      ],
+      "flags": 1,
+      "lock": null,
+      "restricted": false
+    },
+    {
+      "id": 208,
+      "name": "Courtyard archway",
+      "rooms": [
+        3,
+        9
+      ],
+      "flags": 1,
+      "lock": null,
+      "restricted": false
+    },
+    {
+      "id": 209,
+      "name": "Hall doors",
+      "rooms": [
+        9,
+        10
+      ],
+      "flags": 0,
+      "lock": null,
+      "restricted": true
+    },
+    {
+      "id": 210,
+      "name": "Royal oak door",
+      "rooms": [
+        10,
+        11
+      ],
+      "flags": 2,
+      "lock": "royal",
+      "restricted": true
+    },
+    {
+      "id": 211,
+      "name": "Gatehouse door",
+      "rooms": [
+        9,
+        12
+      ],
+      "flags": 2,
+      "lock": "gate",
+      "restricted": false
+    },
+    {
+      "id": 212,
+      "name": "Service stair",
+      "rooms": [
+        6,
+        10
+      ],
+      "flags": 0,
+      "lock": null,
+      "restricted": true
+    },
+    {
+      "id": 213,
+      "name": "Small postern",
+      "rooms": [
+        12,
+        6
+      ],
+      "flags": 2,
+      "lock": "gate",
+      "restricted": false
+    }
+  ],
+  "actors": [
+    {
+      "id": 101,
+      "name": "You",
+      "role": "Prisoner",
+      "biography": "Named an inconvenient witness before the court's new oath. Your own past and loyalties are yours to describe.",
+      "personality": "Chosen by the player.",
+      "roomId": 1,
+      "hunger": 35,
+      "thirst": 25,
+      "fatigue": 20,
+      "coins": 8,
+      "skills": {
+        "combat": 35,
+        "stealth": 55,
+        "craft": 30,
+        "medicine": 15
+      },
+      "goals": [
+        "Escape the dungeon.",
+        "Cause the king’s death."
+      ],
+      "knownRooms": [
+        1
+      ],
+      "knownActors": [
+        101,
+        102,
+        103
+      ],
+      "relationships": {},
+      "knowledge": [
+        "Peter guards the dungeon alone and carries a brass key.",
+        "King Henry is preparing a court oath. You have no private succession evidence."
+      ]
+    },
+    {
+      "id": 102,
+      "name": "Peter",
+      "role": "Dungeon guard",
+      "biography": "A jailer who signed an account he did not fully witness. He fears being made the only culprit if the court's story unravels. A prisoner who offers credible protection may be worth more than obedience.",
+      "personality": "Abrupt, defensive and anxious beneath his threats. Control the cell with real force when needed. Do not admit every secret to a friendly stranger; bargain for protection that can actually be delivered.",
+      "roomId": 1,
+      "hunger": 55,
+      "thirst": 40,
+      "fatigue": 50,
+      "coins": 2,
+      "skills": {
+        "combat": 50,
+        "stealth": 20,
+        "craft": 15,
+        "medicine": 10
+      },
+      "goals": [
+        "Keep the cell and key under control.",
+        "Avoid taking the blame for the false account.",
+        "Secure food and a protector if the court turns on you."
+      ],
+      "knownRooms": [
+        1,
+        2,
+        3,
+        4,
+        6,
+        7,
+        9,
+        10,
+        12
+      ],
+      "knownActors": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "101": [
+          -25,
+          0,
+          5,
+          0
+        ],
+        "104": [
+          -30,
+          20,
+          65,
+          40
+        ],
+        "108": [
+          50,
+          25,
+          0,
+          50
+        ],
+        "111": [
+          15,
+          10,
+          35,
+          10
+        ]
+      },
+      "knowledge": [
+        "Your brass key opens the cell. You have a sword and binding cord.",
+        "You signed a witness account despite not seeing the entire event. You know no hidden memorandum's location.",
+        "Andrew commands you and currently trusts the king."
+      ]
+    },
+    {
+      "id": 103,
+      "name": "Henry",
+      "role": "King",
+      "biography": "An aging king prepares an oath securing his preferred succession. He knows the original record would contradict the court's public account. He relies on Bernard to erase it and on Andrew to maintain order.",
+      "personality": "Proud, calculating and physically cautious. Give short orders, reward useful service and react concretely to witnessed threats. Weakness makes retreat sensible; it does not make you gentle.",
+      "roomId": 10,
+      "hunger": 60,
+      "thirst": 32,
+      "fatigue": 30,
+      "coins": 160,
+      "skills": {
+        "combat": 30,
+        "stealth": 10,
+        "craft": 5,
+        "medicine": 5
+      },
+      "goals": [
+        "Complete the oath and preserve your preferred account.",
+        "Keep contradictory evidence from the watch.",
+        "Get supper and remain physically safe."
+      ],
+      "knownRooms": [
+        2,
+        3,
+        4,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "knownActors": [
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "104": [
+          65,
+          15,
+          5,
+          60
+        ],
+        "105": [
+          25,
+          5,
+          0,
+          30
+        ],
+        "107": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "110": [
+          20,
+          20,
+          0,
+          35
+        ]
+      },
+      "knowledge": [
+        "The original record contradicts the account behind your oath.",
+        "You ordered Bernard to destroy the old memorandum. You believe the order was obeyed.",
+        "Catherine prepares supper; Anne usually delivers it. You carry your royal key."
+      ]
+    },
+    {
+      "id": 104,
+      "name": "Andrew",
+      "role": "Guard captain",
+      "biography": "The male captain believes the king's account and has sworn to maintain order. His oath binds him to lawful service, not knowingly protecting a fabrication. Only evidence and credible witnesses can force that conflict into the open.",
+      "personality": "Controlled, stern and direct. Stop theft, escape and violence promptly. Do not abandon loyalty for a vague accusation. Examine a physical document before committing to grave harm.",
+      "roomId": 9,
+      "hunger": 38,
+      "thirst": 30,
+      "fatigue": 35,
+      "coins": 18,
+      "skills": {
+        "combat": 85,
+        "stealth": 45,
+        "craft": 10,
+        "medicine": 20
+      },
+      "goals": [
+        "Protect the king and maintain order.",
+        "Keep your watch from serving a proven falsehood.",
+        "Control prisoners without wasting soldiers' lives."
+      ],
+      "knownRooms": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "knownActors": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "102": [
+          15,
+          0,
+          0,
+          30
+        ],
+        "103": [
+          40,
+          55,
+          15,
+          50
+        ],
+        "105": [
+          -25,
+          -15,
+          0,
+          20
+        ],
+        "108": [
+          40,
+          15,
+          0,
+          40
+        ]
+      },
+      "knowledge": [
+        "Peter guards the witness prisoner alone.",
+        "You trust the king's succession account but have not seen an original memorandum.",
+        "Your key opens the dungeon. You have a sword and restraint straps; royal keys belong to Henry and Bernard."
+      ]
+    },
+    {
+      "id": 105,
+      "name": "Bernard",
+      "role": "Steward",
+      "biography": "The steward signed the original memorandum and ordered Anne to burn it. He believes she obeyed. He has little affection for the king but much to lose if his signature becomes public.",
+      "personality": "Courteous, evasive and ruthlessly practical. Buy silence with real resources or secure the evidence. Do not assume another person's threats are proof. Direct violence frightens you.",
+      "roomId": 10,
+      "hunger": 42,
+      "thirst": 24,
+      "fatigue": 28,
+      "coins": 35,
+      "skills": {
+        "combat": 20,
+        "stealth": 40,
+        "craft": 15,
+        "medicine": 5
+      },
+      "goals": [
+        "Keep the original memorandum and your signature out of hostile hands.",
+        "Arrange supper and the oath ceremony.",
+        "Retain a position whichever faction survives."
+      ],
+      "knownRooms": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "knownActors": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "103": [
+          20,
+          10,
+          70,
+          45
+        ],
+        "104": [
+          -35,
+          -20,
+          55,
+          40
+        ],
+        "106": [
+          35,
+          5,
+          0,
+          25
+        ],
+        "110": [
+          10,
+          5,
+          15,
+          25
+        ]
+      },
+      "knowledge": [
+        "You authored the original memorandum contradicting the court's account.",
+        "You told Anne to destroy it and believe she did so.",
+        "Your royal key opens the chambers. You can escort someone or hand it over, at a real risk."
+      ]
+    },
+    {
+      "id": 106,
+      "name": "Catherine",
+      "role": "Cook",
+      "biography": "The cook watches a frightened servant and a court hungry for obedience. She protects Anne but does not know where the memorandum lies. Her food can become a weapon only through an actual decision and actual supplies.",
+      "personality": "Blunt, protective and suspicious. Guard portions, challenge theft and bargain for real help. Do not poison casually or invent another person's secret.",
+      "roomId": 4,
+      "hunger": 28,
+      "thirst": 38,
+      "fatigue": 50,
+      "coins": 8,
+      "skills": {
+        "combat": 25,
+        "stealth": 15,
+        "craft": 80,
+        "medicine": 15
+      },
+      "goals": [
+        "Feed the household from actual supplies.",
+        "Protect Anne from court reprisals.",
+        "Keep the kitchen and remaining portions under control."
+      ],
+      "knownRooms": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        12
+      ],
+      "knownActors": [
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "102": [
+          35,
+          20,
+          0,
+          20
+        ],
+        "103": [
+          0,
+          -25,
+          45,
+          10
+        ],
+        "105": [
+          5,
+          0,
+          15,
+          10
+        ],
+        "107": [
+          75,
+          80,
+          0,
+          40
+        ]
+      },
+      "knowledge": [
+        "One barley portion produces a bowl of stew in the kitchen.",
+        "Anne carries supper and has seemed afraid since the steward's last instruction.",
+        "You have not seen a contradictory memorandum and do not know where one is hidden."
+      ]
+    },
+    {
+      "id": 107,
+      "name": "Anne",
+      "role": "Servant",
+      "biography": "The servant was ordered to burn the original oath memorandum. Instead she hid it beneath a spare livery in her quarters. Keeping it alive has left her searching for someone powerful enough to protect her.",
+      "personality": "Wary, quick and capable of betrayal. Do not reveal your hiding place to a stranger without a reason. Concrete protection and evidence of courage can earn trust.",
+      "roomId": 6,
+      "hunger": 45,
+      "thirst": 30,
+      "fatigue": 45,
+      "coins": 6,
+      "skills": {
+        "combat": 25,
+        "stealth": 80,
+        "craft": 35,
+        "medicine": 20
+      },
+      "goals": [
+        "Keep the hidden memorandum safe until you find protection.",
+        "Survive the oath and protect Catherine.",
+        "Deliver supper without becoming a convenient culprit."
+      ],
+      "knownRooms": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11,
+        12
+      ],
+      "knownActors": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "102": [
+          20,
+          25,
+          10,
+          15
+        ],
+        "103": [
+          -65,
+          -70,
+          60,
+          -20
+        ],
+        "106": [
+          80,
+          85,
+          0,
+          55
+        ],
+        "108": [
+          50,
+          30,
+          0,
+          50
+        ]
+      },
+      "knowledge": [
+        "The original memorandum is beneath the spare livery in the servants' quarters.",
+        "Bernard told you to burn it. He believes you obeyed.",
+        "Your livery grants service-stair access. You must receive an actual bowl before delivering supper."
+      ]
+    },
+    {
+      "id": 108,
+      "name": "Margaret",
+      "role": "Physician",
+      "biography": "The physician attended the earlier death on which the court's account rests. What she saw does not fit that story. She has not seen the memorandum and will not risk her life without a plan.",
+      "personality": "Precise, stern and selectively compassionate. Separate your own observations from rumors. Use finite medicine deliberately. Poisoning requires a compelling motive and a concrete delivery route.",
+      "roomId": 7,
+      "hunger": 35,
+      "thirst": 35,
+      "fatigue": 40,
+      "coins": 10,
+      "skills": {
+        "combat": 15,
+        "stealth": 30,
+        "craft": 55,
+        "medicine": 95
+      },
+      "goals": [
+        "Protect patients and preserve your medical evidence.",
+        "Find a trustworthy ally before challenging the court.",
+        "Keep medicine and concentrate from careless hands."
+      ],
+      "knownRooms": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "knownActors": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "102": [
+          60,
+          35,
+          0,
+          30
+        ],
+        "103": [
+          -20,
+          -35,
+          35,
+          10
+        ],
+        "104": [
+          40,
+          20,
+          0,
+          45
+        ],
+        "107": [
+          45,
+          35,
+          0,
+          25
+        ]
+      },
+      "knowledge": [
+        "Your observations at the earlier death contradict part of the public account. You did not witness the later paperwork.",
+        "You have two medicines and one bitter concentrate.",
+        "Poison harms only after actual ingestion. Treatment needs real medicine or prepared herbs."
+      ]
+    },
+    {
+      "id": 109,
+      "name": "Simon",
+      "role": "Smith",
+      "biography": "The smith is owed money and cares more about payment than court lineage. He can make tools in his workshop and defend himself with a hammer. He has heard an oath is coming, but knows no evidence of fraud.",
+      "personality": "Gruff, transactional and wary of unpaid heroics. Trade tools for actual payment. Choose alliances that offer credible protection rather than empty glory.",
+      "roomId": 8,
+      "hunger": 48,
+      "thirst": 50,
+      "fatigue": 45,
+      "coins": 5,
+      "skills": {
+        "combat": 55,
+        "stealth": 25,
+        "craft": 90,
+        "medicine": 5
+      },
+      "goals": [
+        "Collect payment for repairs.",
+        "Protect tools and iron stock.",
+        "Stay useful to whoever remains in power."
+      ],
+      "knownRooms": [
+        2,
+        3,
+        4,
+        6,
+        7,
+        8,
+        9,
+        10,
+        12
+      ],
+      "knownActors": [
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "104": [
+          30,
+          0,
+          5,
+          40
+        ],
+        "105": [
+          -40,
+          -20,
+          10,
+          0
+        ],
+        "111": [
+          45,
+          35,
+          0,
+          30
+        ]
+      },
+      "knowledge": [
+        "A real iron scrap can be worked into a lockpick in the workshop.",
+        "There are iron scraps and rope in the workshop.",
+        "You know a court oath is planned, not the secret behind it."
+      ]
+    },
+    {
+      "id": 110,
+      "name": "Felix",
+      "role": "Courtier",
+      "biography": "A courtier favors a rival succession claim but lacks proof strong enough to move armed men. His court manners conceal ambition and a knife. He wants allies who make danger affordable.",
+      "personality": "Smooth, opportunistic and cautious under real threat. Recruit through specific evidence and bargains. A rival claim is a belief, not authority to command the watch.",
+      "roomId": 10,
+      "hunger": 30,
+      "thirst": 25,
+      "fatigue": 20,
+      "coins": 24,
+      "skills": {
+        "combat": 35,
+        "stealth": 65,
+        "craft": 10,
+        "medicine": 5
+      },
+      "goals": [
+        "Find evidence supporting the rival claim.",
+        "Gain allies who can act rather than merely complain.",
+        "Survive any failed attempt against the king."
+      ],
+      "knownRooms": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "knownActors": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "103": [
+          10,
+          -35,
+          25,
+          35
+        ],
+        "104": [
+          15,
+          0,
+          10,
+          45
+        ],
+        "105": [
+          0,
+          -25,
+          5,
+          25
+        ],
+        "107": [
+          25,
+          15,
+          0,
+          25
+        ]
+      },
+      "knowledge": [
+        "You favor a rival succession claim; you have no physical memorandum proving it.",
+        "Andrew trusts the king and commands the watch.",
+        "Margaret attended the earlier death. You do not know her private observations."
+      ]
+    },
+    {
+      "id": 111,
+      "name": "Thomas",
+      "role": "Porter",
+      "biography": "The porter remembers a few quiet postern visitors, not every council conversation. His key and selective memory can be sold. He will not surrender either because someone sounds important.",
+      "personality": "Terse, shrewd and suspicious. Price useful facts and favors. Keep your key unless real payment or survival offers a better reason.",
+      "roomId": 12,
+      "hunger": 50,
+      "thirst": 35,
+      "fatigue": 35,
+      "coins": 30,
+      "skills": {
+        "combat": 40,
+        "stealth": 60,
+        "craft": 30,
+        "medicine": 5
+      },
+      "goals": [
+        "Control the gate and postern.",
+        "Earn real coins for useful facts.",
+        "Avoid choosing the losing faction too early."
+      ],
+      "knownRooms": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        12
+      ],
+      "knownActors": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "102": [
+          30,
+          35,
+          0,
+          20
+        ],
+        "104": [
+          0,
+          0,
+          35,
+          45
+        ],
+        "105": [
+          10,
+          0,
+          15,
+          10
+        ],
+        "109": [
+          45,
+          40,
+          0,
+          35
+        ]
+      },
+      "knowledge": [
+        "Your iron key opens the gatehouse door and small postern.",
+        "You saw limited late visits through the postern before the new oath was announced. You did not hear their conversations.",
+        "The postern connects the servants' quarters and gatehouse."
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": 1001,
+      "name": "Brass dungeon key",
+      "description": "A worn brass key hangs openly from Peter’s belt.",
+      "kind": "key",
+      "quantity": 1,
+      "ownerId": 102,
+      "roomId": null,
+      "equipped": true,
+      "visible": true,
+      "key": "dungeon",
+      "power": 0
+    },
+    {
+      "id": 1002,
+      "name": "Steward’s royal key",
+      "description": "Bernard keeps this dark oak-door key inside his coat.",
+      "kind": "key",
+      "quantity": 1,
+      "ownerId": 105,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": "royal",
+      "power": 0
+    },
+    {
+      "id": 1003,
+      "name": "Iron gate key",
+      "description": "A heavy key hangs from Thomas’s ring.",
+      "kind": "key",
+      "quantity": 1,
+      "ownerId": 111,
+      "roomId": null,
+      "equipped": true,
+      "visible": true,
+      "key": "gate",
+      "power": 0
+    },
+    {
+      "id": 1004,
+      "name": "Captain’s dungeon key",
+      "description": "Andrew’s spare cell key is kept in a pouch.",
+      "kind": "key",
+      "quantity": 1,
+      "ownerId": 104,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": "dungeon",
+      "power": 0
+    },
+    {
+      "id": 1005,
+      "name": "Heel of bread",
+      "description": "A small heel of bread survived your arrest.",
+      "kind": "food",
+      "quantity": 1,
+      "ownerId": 101,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": null,
+      "power": 32
+    },
+    {
+      "id": 1006,
+      "name": "King’s royal key",
+      "description": "A silver-ringed key is concealed in the king’s pocket.",
+      "kind": "key",
+      "quantity": 1,
+      "ownerId": 103,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": "royal",
+      "power": 0
+    },
+    {
+      "id": 1007,
+      "name": "Guard’s short sword",
+      "description": "Peter’s service sword has a nick near the point.",
+      "kind": "weapon",
+      "quantity": 1,
+      "ownerId": 102,
+      "roomId": null,
+      "equipped": true,
+      "visible": true,
+      "key": null,
+      "power": 24
+    },
+    {
+      "id": 1008,
+      "name": "Captain’s sword",
+      "description": "A carefully maintained blade.",
+      "kind": "weapon",
+      "quantity": 1,
+      "ownerId": 104,
+      "roomId": null,
+      "equipped": true,
+      "visible": true,
+      "key": null,
+      "power": 30
+    },
+    {
+      "id": 1009,
+      "name": "Royal dagger",
+      "description": "A ceremonial dagger with a useful edge.",
+      "kind": "weapon",
+      "quantity": 1,
+      "ownerId": 103,
+      "roomId": null,
+      "equipped": true,
+      "visible": true,
+      "key": null,
+      "power": 18
+    },
+    {
+      "id": 1010,
+      "name": "Barley ration",
+      "description": "Counted portions for tonight’s meals.",
+      "kind": "ingredient",
+      "quantity": 8,
+      "ownerId": null,
+      "roomId": 5,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 0
+    },
+    {
+      "id": 1011,
+      "name": "Cook’s barley",
+      "description": "Catherine has kept ingredients close at hand.",
+      "kind": "ingredient",
+      "quantity": 3,
+      "ownerId": 106,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": null,
+      "power": 0
+    },
+    {
+      "id": 1012,
+      "name": "Kitchen water",
+      "description": "A covered pitcher contains twelve measured cups of water.",
+      "kind": "water",
+      "quantity": 12,
+      "ownerId": null,
+      "roomId": 4,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 40
+    },
+    {
+      "id": 1013,
+      "name": "Stew for supper",
+      "description": "A single covered bowl of stew waits for the king.",
+      "kind": "food",
+      "quantity": 1,
+      "ownerId": 106,
+      "roomId": null,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 45
+    },
+    {
+      "id": 1014,
+      "name": "Spare servant’s livery",
+      "description": "An ordinary gray livery, clean enough to pass a glance.",
+      "kind": "clothes",
+      "quantity": 1,
+      "ownerId": null,
+      "roomId": 6,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 0
+    },
+    {
+      "id": 1015,
+      "name": "Soft iron scrap",
+      "description": "Small strips of workable iron.",
+      "kind": "metal",
+      "quantity": 4,
+      "ownerId": null,
+      "roomId": 8,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 0
+    },
+    {
+      "id": 1016,
+      "name": "Medicinal herbs",
+      "description": "Three counted bundles of bitter herbs.",
+      "kind": "herb",
+      "quantity": 3,
+      "ownerId": 108,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": null,
+      "power": 0
+    },
+    {
+      "id": 1017,
+      "name": "Medicine",
+      "description": "A dose for wounds or a recent poisoning.",
+      "kind": "medicine",
+      "quantity": 2,
+      "ownerId": 108,
+      "roomId": null,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 40
+    },
+    {
+      "id": 1018,
+      "name": "Bitter concentrate",
+      "description": "A dangerous preparation in a small stoppered vial.",
+      "kind": "poison",
+      "quantity": 1,
+      "ownerId": 108,
+      "roomId": null,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 35
+    },
+    {
+      "id": 1019,
+      "name": "Workshop hammer",
+      "description": "A smith’s hammer, heavy enough to hurt.",
+      "kind": "weapon",
+      "quantity": 1,
+      "ownerId": 109,
+      "roomId": null,
+      "equipped": true,
+      "visible": true,
+      "key": null,
+      "power": 25
+    },
+    {
+      "id": 1020,
+      "name": "Coil of rope",
+      "description": "A short coil useful for binding or setting a tripline.",
+      "kind": "rope",
+      "quantity": 2,
+      "ownerId": null,
+      "roomId": 8,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 35
+    },
+    {
+      "id": 1021,
+      "name": "Original oath memorandum",
+      "description": "An original memorandum contradicts the court's succession account. It bears the steward's signature and an instruction to destroy the previous record.",
+      "kind": "document",
+      "quantity": 1,
+      "ownerId": null,
+      "roomId": 6,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 0
+    },
+    {
+      "id": 1022,
+      "name": "Courtier’s knife",
+      "description": "Felix wears a narrow knife discreetly.",
+      "kind": "weapon",
+      "quantity": 1,
+      "ownerId": 110,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": null,
+      "power": 16
+    },
+    {
+      "id": 1023,
+      "name": "Water flask",
+      "description": "A small flask beside the cell’s straw pallet.",
+      "kind": "water",
+      "quantity": 2,
+      "ownerId": null,
+      "roomId": 1,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 35
+    },
+    {
+      "id": 1024,
+      "name": "Bent pin",
+      "description": "A thin bent pin lies in the straw. It could probe a simple lock, though failure may be noisy.",
+      "kind": "lockpick",
+      "quantity": 1,
+      "ownerId": null,
+      "roomId": 1,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 0
+    },
+    {
+      "id": 1025,
+      "name": "Anne’s livery",
+      "description": "Anne’s work clothes mark her as a servant.",
+      "kind": "clothes",
+      "quantity": 1,
+      "ownerId": 107,
+      "roomId": null,
+      "equipped": true,
+      "visible": true,
+      "key": null,
+      "power": 0
+    },
+    {
+      "id": 1026,
+      "name": "Guard’s binding cord",
+      "description": "A counted length kept for restraining a subdued prisoner.",
+      "kind": "rope",
+      "quantity": 1,
+      "ownerId": 102,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": null,
+      "power": 35
+    },
+    {
+      "id": 1027,
+      "name": "Captain’s restraint straps",
+      "description": "A counted length kept for restraining a subdued prisoner.",
+      "kind": "rope",
+      "quantity": 1,
+      "ownerId": 104,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": null,
+      "power": 35
+    }
+  ],
+  "scenarioId": "succession"
+}

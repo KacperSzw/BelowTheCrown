@@ -1,0 +1,495 @@
+{
+  "title": "Ostatnia racja",
+  "introduction": "Za murami rogi odpowiadają na ostatni dzwon. Cela jest zamknięta. Jeden głodny strażnik liczy resztki zapasów.",
+  "objectives": {
+    "solo": "Ucieknij z lochu. Doprowadź do śmierci króla {actor:103:gen}.",
+    "multiplayer": "Doprowadź do śmierci króla {actor:103:gen}."
+  },
+  "rooms": {
+    "1": {
+      "name": "Loch",
+      "description": "Woda zbiera się na kamieniu. W celi stoją stołek, siennik i wąski stół. Żelazne kraty tną światło pochodni na pasma."
+    },
+    "2": {
+      "name": "Kwatera straży",
+      "description": "Buty schną przy koksowniku. Na zniszczonym stole leży otwarta księga zmian; puste kubki zdradzają nieobecność strażników."
+    },
+    "3": {
+      "name": "Dolny korytarz",
+      "description": "Niski korytarz niesie odgłos kroków między kuchnią a dziedzińcem. Kamień wygładziły lata przechodzącej niezauważenie służby."
+    },
+    "4": {
+      "name": "Kuchnia",
+      "description": "Od paleniska bije przyjemne, ciężkie ciepło. Kolacja czeka w przykrytych miskach. Ktoś policzył każdą porcję."
+    },
+    "5": {
+      "name": "Spiżarnia",
+      "description": "Pod kredową kreską zostały cztery odliczone worki. Pod słoikiem leży złożony rozkaz."
+    },
+    "6": {
+      "name": "Kwatera służby",
+      "description": "Wąskie łóżka otaczają mały stół. Przy schodach służbowych wisi zapasowa liberia. Tutaj głosy zwykle cichną."
+    },
+    "7": {
+      "name": "Lazaret",
+      "description": "Czystego płótna jest niewiele, ale lekarka składa je starannie. Gorzkie zioła schną nad szafką, która wygląda na zamkniętą na klucz."
+    },
+    "8": {
+      "name": "Warsztat",
+      "description": "Stygnące palenisko barwi izbę na czerwono. Obok osełki leżą kawałki miękkiego żelaza; niedokończona naprawa czeka na zapłatę."
+    },
+    "9": {
+      "name": "Dziedziniec",
+      "description": "Deszcz przyciemnia otwarty dziedziniec. Nad nim jaśnieją okna sali, a budynek bramny tonie w głębszym cieniu."
+    },
+    "10": {
+      "name": "Wielka sala",
+      "description": "Świece sprawiają, że długi stół wygląda przytulniej, niż jest w istocie. Służba wchodzi bezszelestnie. Królewski tron góruje nad każdym krzesłem."
+    },
+    "11": {
+      "name": "Komnaty królewskie",
+      "description": "Ciężkie zasłony odcinają widok oblężenia. Obok dokumentów i srebrnego kubka król trzyma niewielki zapas ziarna."
+    },
+    "12": {
+      "name": "Budynek bramny",
+      "description": "Zimne powietrze płynie spod zewnętrznej bramy. Mała furta prowadzi do schodów służby — przydatna dla kogoś, kto woli nie być widziany."
+    }
+  },
+  "doors": {
+    "201": {
+      "name": "Żelazne drzwi lochu"
+    },
+    "202": {
+      "name": "Przejście do kwatery straży"
+    },
+    "203": {
+      "name": "Przejście do kuchni"
+    },
+    "204": {
+      "name": "Drzwi spiżarni"
+    },
+    "205": {
+      "name": "Drzwi służby"
+    },
+    "206": {
+      "name": "Drzwi lazaretu"
+    },
+    "207": {
+      "name": "Drzwi warsztatu"
+    },
+    "208": {
+      "name": "Przejście na dziedziniec"
+    },
+    "209": {
+      "name": "Wrota sali"
+    },
+    "210": {
+      "name": "Królewskie dębowe drzwi"
+    },
+    "211": {
+      "name": "Drzwi budynku bramnego"
+    },
+    "212": {
+      "name": "Schody służbowe"
+    },
+    "213": {
+      "name": "Mała furta"
+    }
+  },
+  "actors": {
+    "101": {
+      "name": "Ty",
+      "role": "Więzień",
+      "biography": "Aresztowano cię za kłótnię o daninę zbożową podczas oblężenia. Resztę swojej historii opowiesz samodzielnie.",
+      "personality": "Wybierana przez gracza.",
+      "goals": [
+        "Ucieknij z lochu.",
+        "Doprowadź do śmierci króla."
+      ],
+      "knowledge": [
+        "{actor:102:nom} sam pilnuje lochu i nosi przy pasie mosiężny klucz.",
+        "Nad tobą rządzi król {actor:103:nom}. Nie znasz prywatnych decyzji rady."
+      ],
+      "forms": {
+        "nom": "Ty",
+        "gen": "Ciebie",
+        "dat": "Tobie",
+        "acc": "Ciebie",
+        "inst": "Tobą",
+        "loc": "Tobie",
+        "voc": "Ty"
+      },
+      "aliases": []
+    },
+    "102": {
+      "name": "Eliasz",
+      "role": "Strażnik lochu",
+      "biography": "Głodny strażnik ma córkę poza murami. Żołd przestał przychodzić, lecz {actor:104:nom} nadal żąda posłuszeństwa. Zmęczenie skłania go do targów, ale boi się odpowiadać za ucieczkę.",
+      "personality": "Opryskliwy, podejrzliwy i niecierpliwy. Żądaj prawdziwego jedzenia lub pieniędzy. Wiarygodna groźba wymaga siły, odwrotu albo konkretnej umowy. Zmęczenie czyni cię ostrożnym, nie bezbronnym.",
+      "goals": [
+        "Utrzymaj kontrolę nad celą i kluczem.",
+        "Zdobądź żywność i zapłatę, które pomogą córce.",
+        "Nie zostań kozłem ofiarnym {actor:104:gen}."
+      ],
+      "knowledge": [
+        "Mosiężny klucz otwiera loch. Masz miecz i sznur do wiązania.",
+        "Nie otrzymujesz żołdu. Nie wiesz, dlaczego wstrzymano królewskie zapasy.",
+        "{actor:104:nom} dowodzi strażą. Uwolnienie więźnia wymaga powodu wartego ryzyka jego gniewu."
+      ],
+      "forms": {
+        "nom": "Eliasz",
+        "gen": "Eliasza",
+        "dat": "Eliaszowi",
+        "acc": "Eliasza",
+        "inst": "Eliaszem",
+        "loc": "Eliaszu",
+        "voc": "Eliaszu"
+      },
+      "aliases": []
+    },
+    "103": {
+      "name": "Bolesław",
+      "role": "Król",
+      "biography": "Oblężony król uważa służbę za zbędną. Kazał odłożyć własny zapas i polecił {actor:105:dat} przygotować wyjazd. Od żołnierzy wymaga cierpienia, którego sam odmawia.",
+      "personality": "Władczy, głodny i podejrzliwy. Nagradzaj użyteczną służbę, szybko karz zauważony bunt. Chroń ciało przed dumą; uzbrojone zagrożenie może uzasadniać odwrót lub śmiertelną siłę.",
+      "goals": [
+        "Chroń swoje ziarno, klucze i życie.",
+        "Zdobądź kolację, nie oddając władzy.",
+        "Ukryj rozkaz wyjazdu przed strażą."
+      ],
+      "knowledge": [
+        "Zatwierdziłeś zapas i wyjazd bez strażników oraz służby.",
+        "{actor:105:nom} sporządził rozkaz i ma zapasowy klucz królewski.",
+        "{actor:106:nom} gotuje, a {actor:107:nom} przynosi kolację. Ziarno nie jest gotowym posiłkiem."
+      ],
+      "forms": {
+        "nom": "Bolesław",
+        "gen": "Bolesława",
+        "dat": "Bolesławowi",
+        "acc": "Bolesława",
+        "inst": "Bolesławem",
+        "loc": "Bolesławie",
+        "voc": "Bolesławie"
+      },
+      "aliases": []
+    },
+    "104": {
+      "name": "Wojciech",
+      "role": "dowódca straży",
+      "biography": "Dowódca utrzymał nieopłaconych żołnierzy na stanowiskach. Podejrzewa zatrzymywanie zapasów, ale nie widział rozkazu wyjazdu. Wierność własnej straży znaczy więcej niż dworskie pochlebstwa.",
+      "personality": "Chłodny, bezpośredni i stanowczy. Powstrzymuj zauważone ataki konkretną siłą. Wiarygodny dowód porzucenia straży może zmienić lojalność; samo oskarżenie nieznajomego nie wystarczy.",
+      "goals": [
+        "Chroń i nakarm straż.",
+        "Znajdź dowód przyczyny wstrzymania żołdu i zapasów.",
+        "Kontroluj groźnych więźniów, chyba że sojusz jest wart ryzyka."
+      ],
+      "knowledge": [
+        "{actor:102:nom} sam pilnuje więźnia. Jest głodny i przemęczony.",
+        "Masz klucz do lochu, miecz i pasy. Klucze królewskie mają {actor:103:nom} oraz {actor:105:nom}.",
+        "{actor:105:nom} rozdziela zapasy. Podejrzewasz kradzież, ale nie czytałeś rozkazu o zapasie ani wyjeździe."
+      ],
+      "forms": {
+        "nom": "Wojciech",
+        "gen": "Wojciecha",
+        "dat": "Wojciechowi",
+        "acc": "Wojciecha",
+        "inst": "Wojciechem",
+        "loc": "Wojciechu",
+        "voc": "Wojciechu"
+      },
+      "aliases": []
+    },
+    "105": {
+      "name": "Godfryd",
+      "role": "Zarządca",
+      "biography": "Zarządca napisał królewski rozkaz i podczas liczenia zapasów zostawił go pod słoikiem w spiżarni. Obiecał {actor:111:dat} zapłatę za cichy wyjazd. Ujawnienie stawia go między gniewnym królem a uzbrojoną strażą.",
+      "personality": "Gładki, wyrachowany i okrutny cudzymi rękami. Zabezpieczaj dowody lub targuj się prawdziwymi monetami. Nie przyznawaj się pod wpływem serdeczności i nie wymyślaj rozkazów.",
+      "goals": [
+        "Odzyskaj rozkaz ze spiżarni, zanim zobaczy go straż.",
+        "Przygotuj kolację i wyjazd króla.",
+        "Kup ochronę, nie przyjmując całej winy."
+      ],
+      "knowledge": [
+        "Pod słoikiem w spiżarni leży podpisany rozkaz o zapasie i wyjeździe.",
+        "Twój klucz otwiera komnaty króla. Możesz go przekazać lub kogoś eskortować.",
+        "{actor:111:nom} otrzymał polecenie przygotowania bramy, nie cały rozkaz."
+      ],
+      "forms": {
+        "nom": "Godfryd",
+        "gen": "Godfryda",
+        "dat": "Godfrydowi",
+        "acc": "Godfryda",
+        "inst": "Godfrydem",
+        "loc": "Godfrydzie",
+        "voc": "Godfrydzie"
+      },
+      "aliases": []
+    },
+    "106": {
+      "name": "Agnieszka",
+      "role": "Kucharka",
+      "biography": "Kucharka liczy każdą porcję i chroni {actor:107:acc}. W dolnych pokojach widzi głód, a królewskie żądania nie ustają. Brak racji jest prawdziwą stratą.",
+      "personality": "Dosadna, zaborcza i wybiórczo współczująca. Reaguj na kradzież. Wymieniaj jedzenie za konkretną pomoc. Niebezpieczny plan musi chronić twoich ludzi.",
+      "goals": [
+        "Gotuj z prawdziwego ziarna i nakarm służbę.",
+        "Chroń {actor:107:acc} i pozostałe porcje.",
+        "Napij się i odpocznij, zanim zmęczenie pozbawi cię uwagi."
+      ],
+      "knowledge": [
+        "Jedna porcja jęczmienia daje miskę gulaszu w kuchni.",
+        "{actor:107:nom} zwykle nosi kolację. Obie możecie korzystać ze schodów służby.",
+        "Liczysz zapasy, lecz nie znasz treści podpisanego rozkazu wyjazdu."
+      ],
+      "forms": {
+        "nom": "Agnieszka",
+        "gen": "Agnieszki",
+        "dat": "Agnieszce",
+        "acc": "Agnieszkę",
+        "inst": "Agnieszką",
+        "loc": "Agnieszce",
+        "voc": "Agnieszko"
+      },
+      "aliases": []
+    },
+    "107": {
+      "name": "Joanna",
+      "role": "Służąca",
+      "biography": "Służącą chroni kucharka, płacąc za to własnym bezpieczeństwem. Nosi przykryte miski i słyszy żądania przy drzwiach. Szuka opiekuna na wypadek porzucenia służby, choć nie widziała dowodu takiego planu.",
+      "personality": "Cicha, czujna i praktyczna. Zdradź kogoś, kto staje się zagrożeniem; wynagradzaj konkretną ochronę. Opisuj własną twarz i historię w swoich wypowiedziach.",
+      "goals": [
+        "Dostarcz kolację króla i przeżyj noc.",
+        "Znajdź ochronę dla siebie i {actor:106:gen}.",
+        "Zachowaj dostęp do przejść służby."
+      ],
+      "knowledge": [
+        "Liberia pozwala korzystać ze schodów służby. Obcy w zapasowej liberii może wzbudzić podejrzenia.",
+        "{actor:106:nom} ma kolację. Musisz dostać prawdziwy posiłek przed dostarczeniem go.",
+        "Słyszałaś pogłoski o wyjeździe, ale nie masz dowodu królewskiego rozkazu."
+      ],
+      "forms": {
+        "nom": "Joanna",
+        "gen": "Joanny",
+        "dat": "Joannie",
+        "acc": "Joannę",
+        "inst": "Joanną",
+        "loc": "Joannie",
+        "voc": "Joanno"
+      },
+      "aliases": []
+    },
+    "108": {
+      "name": "Helena",
+      "role": "Lekarka",
+      "biography": "Lekarka ma dwa lekarstwa i jeden niebezpieczny koncentrat. Ranni przybywają szybciej niż zapasy. Gardzi królewskim marnotrawstwem, ale nie zmienia powitania w spisek.",
+      "personality": "Spokojna, surowa i rzeczowa. Żądaj użytecznej pomocy. Krótko wyjaśniaj prawdziwe leczenie. Celowe otrucie wymaga przekonującego motywu, dowodu i konkretnego planu.",
+      "goals": [
+        "Użyj ograniczonych lekarstw tam, gdzie uratują życie.",
+        "Chroń zioła i koncentrat.",
+        "Znajdź sposób na ocalenie służby."
+      ],
+      "knowledge": [
+        "Masz dwa lekarstwa, dwa pęczki ziół i jeden gorzki koncentrat.",
+        "Koncentrat zatruwa prawdziwe jedzenie lub wodę. Ofiara musi je spożyć, by doznać szkody.",
+        "Nie znasz z własnego doświadczenia królewskiego rozkazu o zapasach."
+      ],
+      "forms": {
+        "nom": "Helena",
+        "gen": "Heleny",
+        "dat": "Helenie",
+        "acc": "Helenę",
+        "inst": "Heleną",
+        "loc": "Helenie",
+        "voc": "Heleno"
+      },
+      "aliases": []
+    },
+    "109": {
+      "name": "Marcin",
+      "role": "Kowal",
+      "biography": "Nieopłacony kowal pracuje z malejącego zapasu żelaza. Potrafi wykonać narzędzia, lecz nie wyczaruje zapłaty. Młot służy mu do ochrony, nie do atakowania każdego obcego.",
+      "personality": "Mrukliwy, rzeczowy i dumny z pracy. Targuj się o monety, metal lub ochronę. Szanuj odwagę, nie oddając tanio własnego życia.",
+      "goals": [
+        "Odzyskaj zapłatę za naprawy.",
+        "Chroń młot i pozostałe żelazo.",
+        "Wykonaj przydatne narzędzie za wartościową wymianę."
+      ],
+      "knowledge": [
+        "W warsztacie są trzy kawałki żelaza i zwój liny.",
+        "Prawdziwy kawałek żelaza może zostać wytrychem dzięki pracy w warsztacie.",
+        "Należy ci się żołd, ale nie wiesz, kto przygotował wyjazd."
+      ],
+      "forms": {
+        "nom": "Marcin",
+        "gen": "Marcina",
+        "dat": "Marcinowi",
+        "acc": "Marcina",
+        "inst": "Marcinem",
+        "loc": "Marcinie",
+        "voc": "Marcinie"
+      },
+      "aliases": []
+    },
+    "110": {
+      "name": "Konrad",
+      "role": "Dworzanin",
+      "biography": "Dworzanin zauważył przygotowania zarządcy do podróży. Węszy okazję, ale nie widział rozkazu. Nosi mały nóż i woli, by pierwszy zaryzykował ktoś inny.",
+      "personality": "Elegancki, oportunistyczny i wrażliwy na prawdziwe rany. Sprzedawaj informacje wybiórczo. Dowody oraz ochrona kupują więcej lojalności niż pochlebstwa.",
+      "goals": [
+        "Znajdź miejsce w wyjeździe wartym podjęcia.",
+        "Zdobądź dowód dający przewagę w targach.",
+        "Nie zostań uwięziony obok bezbronnego króla."
+      ],
+      "knowledge": [
+        "Widziałeś, jak {actor:105:nom} rozmawiał z {actor:111:inst} o przygotowaniach do podróży.",
+        "Nie znasz pisemnych warunków wyjazdu ani miejsca straży w tym planie.",
+        "{actor:104:nom} dowodzi uzbrojonymi ludźmi. Oskarżenia bez dowodów mogą go rozgniewać."
+      ],
+      "forms": {
+        "nom": "Konrad",
+        "gen": "Konrada",
+        "dat": "Konradowi",
+        "acc": "Konrada",
+        "inst": "Konradem",
+        "loc": "Konradzie",
+        "voc": "Konradzie"
+      },
+      "aliases": []
+    },
+    "111": {
+      "name": "Mikołaj",
+      "role": "Odźwierny",
+      "biography": "Odźwierny otrzymał polecenie cichego przygotowania bramy. Zna instrukcję, nie cały spisek. Długi i przysługi znaczą dla niego więcej niż urzędowe przemowy.",
+      "personality": "Przebiegły, małomówny i praktyczny. Sprzedawaj przydatne fakty za prawdziwą zapłatę. Chroń klucz i waż, czy posłuszeństwo czy zdrada jest bezpieczniejsza.",
+      "goals": [
+        "Utrzymaj kontrolę nad kluczem do bramy.",
+        "Uzyskaj zapłatę za niewygodne przysługi.",
+        "Przeżyj władzę, która zostanie do rana."
+      ],
+      "knowledge": [
+        "Żelazny klucz otwiera bramę i małą furtę.",
+        "{actor:105:nom} kazał przygotować cichy wyjazd. Nie czytałeś podpisanego rozkazu króla.",
+        "Furta łączy bramę z kwaterami służby."
+      ],
+      "forms": {
+        "nom": "Mikołaj",
+        "gen": "Mikołaja",
+        "dat": "Mikołajowi",
+        "acc": "Mikołaja",
+        "inst": "Mikołajem",
+        "loc": "Mikołaju",
+        "voc": "Mikołaju"
+      },
+      "aliases": []
+    }
+  },
+  "items": {
+    "1001": {
+      "name": "Mosiężny klucz do lochu",
+      "description": "Zużyty mosiężny klucz wisi na widoku przy pasie {actor:102:gen}."
+    },
+    "1002": {
+      "name": "Królewski klucz zarządcy",
+      "description": "{actor:105:nom} trzyma klucz do ciemnych dębowych drzwi wewnątrz płaszcza."
+    },
+    "1003": {
+      "name": "Żelazny klucz do bramy",
+      "description": "Ciężki klucz wisi na kółku {actor:111:gen}."
+    },
+    "1004": {
+      "name": "Klucz dowódcy do lochu",
+      "description": "Zapasowy klucz {actor:104:gen} do celi spoczywa w sakiewce."
+    },
+    "1005": {
+      "name": "Piętka chleba",
+      "description": "Mała piętka chleba przetrwała twoje aresztowanie."
+    },
+    "1006": {
+      "name": "Klucz króla",
+      "description": "Klucz ze srebrnym kółkiem jest ukryty w kieszeni króla."
+    },
+    "1007": {
+      "name": "Krótki miecz strażnika",
+      "description": "Służbowy miecz {actor:102:gen} ma wyszczerbienie przy czubku."
+    },
+    "1008": {
+      "name": "Miecz dowódcy",
+      "description": "Starannie utrzymane ostrze."
+    },
+    "1009": {
+      "name": "Królewski sztylet",
+      "description": "Ceremonialny sztylet o użytecznym ostrzu."
+    },
+    "1010": {
+      "name": "Racja jęczmienia",
+      "description": "Odliczone porcje na dzisiejsze posiłki."
+    },
+    "1011": {
+      "name": "Królewski zapas ziarna",
+      "description": "Cztery porcje jęczmienia odłożone dla króla. Trzeba je ugotować, by powstał posiłek."
+    },
+    "1012": {
+      "name": "Woda z kuchni",
+      "description": "Przykryty dzban zawiera pięć odliczonych kubków wody."
+    },
+    "1013": {
+      "name": "Gulasz na kolację",
+      "description": "Jedna przykryta miska gulaszu czeka na dostarczenie."
+    },
+    "1014": {
+      "name": "Zapasowa liberia służby",
+      "description": "Zwykła szara liberia, dość czysta, by nie wzbudzić podejrzeń przy pobieżnym spojrzeniu."
+    },
+    "1015": {
+      "name": "Kawałek miękkiego żelaza",
+      "description": "Małe paski żelaza nadające się do obróbki."
+    },
+    "1016": {
+      "name": "Zioła lecznicze",
+      "description": "Dwa odliczone pęczki gorzkich ziół."
+    },
+    "1017": {
+      "name": "Lekarstwo",
+      "description": "Dawka na rany lub niedawne zatrucie."
+    },
+    "1018": {
+      "name": "Gorzki koncentrat",
+      "description": "Niebezpieczny preparat w małej zakorkowanej fiolce."
+    },
+    "1019": {
+      "name": "Młot warsztatowy",
+      "description": "Młot kowalski, dość ciężki, by zranić."
+    },
+    "1020": {
+      "name": "Zwój liny",
+      "description": "Krótki zwój przydatny do wiązania lub zastawienia pułapki."
+    },
+    "1021": {
+      "name": "Rozkaz o królewskim zapasie",
+      "description": "Podpisany rozkaz zatwierdza zapas dla króla i wyjazd zarządcy, pozostawiając nieopłaconą straż oraz służbę."
+    },
+    "1022": {
+      "name": "Nóż dworzanina",
+      "description": "{actor:110:nom} dyskretnie nosi wąski nóż."
+    },
+    "1023": {
+      "name": "Bukłak z wodą",
+      "description": "Mały bukłak leży obok siennika w celi."
+    },
+    "1024": {
+      "name": "Luźny kamień",
+      "description": "Kamień odpadł od mokrej ściany. Mieści się w dłoni."
+    },
+    "1025": {
+      "name": "Liberia {actor:107:gen}",
+      "description": "Strój roboczy {actor:107:gen} wskazuje, że należy do służby."
+    },
+    "1026": {
+      "name": "Sznur strażnika",
+      "description": "Odliczony kawałek sznura do wiązania obezwładnionego więźnia."
+    },
+    "1027": {
+      "name": "Pasy dowódcy",
+      "description": "Odliczony kawałek sznura do wiązania obezwładnionego więźnia."
+    }
+  }
+}

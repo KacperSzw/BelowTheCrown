@@ -1,0 +1,88 @@
+name: Build and release
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: below-the-crown-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check and build ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            target: aarch64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+      - name: Formatting
+        run: nix develop --command cargo fmt --all --check
+      - name: Clippy
+        run: nix develop --command cargo clippy --locked --all-targets -- -D warnings
+      - name: Behavior tests
+        run: nix develop --command cargo test --locked
+      - name: Build standalone binary and source artifacts
+        run: ./tools/build-release.sh '${{ matrix.target }}'
+      - name: Empty-directory smoke test
+        shell: bash
+        run: |
+          binary="$GITHUB_WORKSPACE/dist/below-the-crown-linux-${{ matrix.arch }}"
+          smoke_dir=$(mktemp -d)
+          cd "$smoke_dir"
+          "$binary" --version
+          "$binary" --help
+          # No Codex credentials or paid calls are available in CI.
+          # An absent Codex must fail doctor clearly rather than crash.
+          if PATH=/usr/bin:/bin "$binary" --data-dir "$smoke_dir/state" doctor > doctor.txt 2>&1; then
+            echo 'Unexpected successful doctor with no Codex' >&2
+            exit 1
+          fi
+          cat doctor.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: below-the-crown-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish preview or stable
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs: check
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: below-the-crown-publish-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: below-the-crown-*
+          path: dist
+          merge-multiple: true
+      - name: Publish verified artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: ./tools/publish-release.sh

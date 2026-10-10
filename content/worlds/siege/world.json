@@ -1,0 +1,1414 @@
+{
+  "title": "The Last Ration",
+  "introduction": "Beyond the walls, horns answer the last bell. Your cell is locked. One hungry guard counts what remains.",
+  "time": 64800,
+  "rooms": [
+    {
+      "id": 1,
+      "name": "Dungeon",
+      "description": "Water beads on the stone. A stool, a straw pallet, and a narrow table occupy the cell. Iron bars cut the torchlight into strips.",
+      "cover": true,
+      "prison": true
+    },
+    {
+      "id": 2,
+      "name": "Guard quarters",
+      "description": "Boots dry beside a brazier. A shift ledger lies open on a scarred table; empty mugs mark the absent watch.",
+      "cover": true,
+      "prison": false
+    },
+    {
+      "id": 3,
+      "name": "Lower passage",
+      "description": "A low passage carries footsteps between the kitchens and the yard. The stone is worn smooth by years of servants passing unseen.",
+      "cover": false,
+      "prison": false
+    },
+    {
+      "id": 4,
+      "name": "Kitchen",
+      "description": "The hearth gives off a thick, welcome heat. Supper waits in covered bowls, and someone has counted every portion.",
+      "cover": true,
+      "prison": false
+    },
+    {
+      "id": 5,
+      "name": "Pantry",
+      "description": "Four measured sacks remain below a chalk tally. A folded order lies beneath the store jar.",
+      "cover": true,
+      "prison": false
+    },
+    {
+      "id": 6,
+      "name": "Servants’ quarters",
+      "description": "Narrow beds surround a small table. A spare livery hangs beside the service stairs. Voices tend to fall quiet here.",
+      "cover": true,
+      "prison": false
+    },
+    {
+      "id": 7,
+      "name": "Infirmary",
+      "description": "Clean linen is scarce, but the physician keeps it carefully folded. Bitter herbs dry above a locked-looking cupboard.",
+      "cover": false,
+      "prison": false
+    },
+    {
+      "id": 8,
+      "name": "Workshop",
+      "description": "A cooling forge stains the room red. Scraps of soft iron lie beside a whetstone; a half-finished repair waits for payment.",
+      "cover": true,
+      "prison": false
+    },
+    {
+      "id": 9,
+      "name": "Courtyard",
+      "description": "Rain darkens the open yard. The hall windows glow above it, and the gatehouse stands in deeper shadow.",
+      "cover": false,
+      "prison": false
+    },
+    {
+      "id": 10,
+      "name": "Great hall",
+      "description": "Candles make the long table look warmer than it is. Servants enter quietly. The royal seat watches every other chair.",
+      "cover": true,
+      "prison": false
+    },
+    {
+      "id": 11,
+      "name": "Royal chambers",
+      "description": "Heavy curtains shut out the siege. The king keeps a small grain reserve beside his papers and a silver cup.",
+      "cover": true,
+      "prison": false
+    },
+    {
+      "id": 12,
+      "name": "Gatehouse",
+      "description": "Cold air moves beneath the outer gate. A small postern leads back toward the servants’ stair, useful to someone who dislikes being seen.",
+      "cover": true,
+      "prison": false
+    }
+  ],
+  "doors": [
+    {
+      "id": 201,
+      "name": "Iron dungeon door",
+      "rooms": [
+        1,
+        2
+      ],
+      "flags": 6,
+      "lock": "dungeon",
+      "restricted": false
+    },
+    {
+      "id": 202,
+      "name": "Quarters archway",
+      "rooms": [
+        2,
+        3
+      ],
+      "flags": 1,
+      "lock": null,
+      "restricted": false
+    },
+    {
+      "id": 203,
+      "name": "Kitchen archway",
+      "rooms": [
+        3,
+        4
+      ],
+      "flags": 1,
+      "lock": null,
+      "restricted": false
+    },
+    {
+      "id": 204,
+      "name": "Pantry door",
+      "rooms": [
+        4,
+        5
+      ],
+      "flags": 0,
+      "lock": null,
+      "restricted": false
+    },
+    {
+      "id": 205,
+      "name": "Servants’ door",
+      "rooms": [
+        4,
+        6
+      ],
+      "flags": 1,
+      "lock": null,
+      "restricted": false
+    },
+    {
+      "id": 206,
+      "name": "Infirmary door",
+      "rooms": [
+        3,
+        7
+      ],
+      "flags": 1,
+      "lock": null,
+      "restricted": false
+    },
+    {
+      "id": 207,
+      "name": "Workshop door",
+      "rooms": [
+        9,
+        8
+      ],
+      "flags": 1,
+      "lock": null,
+      "restricted": false
+    },
+    {
+      "id": 208,
+      "name": "Courtyard archway",
+      "rooms": [
+        3,
+        9
+      ],
+      "flags": 1,
+      "lock": null,
+      "restricted": false
+    },
+    {
+      "id": 209,
+      "name": "Hall doors",
+      "rooms": [
+        9,
+        10
+      ],
+      "flags": 0,
+      "lock": null,
+      "restricted": true
+    },
+    {
+      "id": 210,
+      "name": "Royal oak door",
+      "rooms": [
+        10,
+        11
+      ],
+      "flags": 2,
+      "lock": "royal",
+      "restricted": true
+    },
+    {
+      "id": 211,
+      "name": "Gatehouse door",
+      "rooms": [
+        9,
+        12
+      ],
+      "flags": 2,
+      "lock": "gate",
+      "restricted": false
+    },
+    {
+      "id": 212,
+      "name": "Service stair",
+      "rooms": [
+        6,
+        10
+      ],
+      "flags": 0,
+      "lock": null,
+      "restricted": true
+    },
+    {
+      "id": 213,
+      "name": "Small postern",
+      "rooms": [
+        12,
+        6
+      ],
+      "flags": 2,
+      "lock": "gate",
+      "restricted": false
+    }
+  ],
+  "actors": [
+    {
+      "id": 101,
+      "name": "You",
+      "role": "Prisoner",
+      "biography": "Seized after arguing over a grain levy during the siege. What else happened to you is yours to tell.",
+      "personality": "Chosen by the player.",
+      "roomId": 1,
+      "hunger": 35,
+      "thirst": 25,
+      "fatigue": 20,
+      "coins": 4,
+      "skills": {
+        "combat": 35,
+        "stealth": 55,
+        "craft": 30,
+        "medicine": 15
+      },
+      "goals": [
+        "Escape the dungeon.",
+        "Cause the king’s death."
+      ],
+      "knownRooms": [
+        1
+      ],
+      "knownActors": [
+        101,
+        102,
+        103
+      ],
+      "relationships": {},
+      "knowledge": [
+        "Elias is the lone dungeon guard and wears a brass key.",
+        "King Aldric rules above you. You know no private council decisions."
+      ]
+    },
+    {
+      "id": 102,
+      "name": "Elias",
+      "role": "Dungeon guard",
+      "biography": "A hungry jailer with a daughter outside the walls. His pay has stopped; Walter still demands obedience. He is tired enough to consider a bargain, but fears taking the blame for an escape.",
+      "personality": "Rough, suspicious and impatient. Demand real food or money. One credible threat deserves force, retreat or an explicit bargain. Exhaustion makes you cautious, not harmless.",
+      "roomId": 1,
+      "hunger": 70,
+      "thirst": 55,
+      "fatigue": 80,
+      "coins": 2,
+      "skills": {
+        "combat": 45,
+        "stealth": 20,
+        "craft": 15,
+        "medicine": 10
+      },
+      "goals": [
+        "Keep control of the cell and its key.",
+        "Obtain food and payment that can help your daughter.",
+        "Avoid becoming Walter's scapegoat."
+      ],
+      "knownRooms": [
+        1,
+        2,
+        3,
+        4,
+        6,
+        7,
+        9,
+        10,
+        12
+      ],
+      "knownActors": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "101": [
+          -25,
+          0,
+          5,
+          0
+        ],
+        "104": [
+          -30,
+          25,
+          65,
+          40
+        ],
+        "108": [
+          50,
+          25,
+          0,
+          50
+        ],
+        "111": [
+          15,
+          10,
+          35,
+          10
+        ]
+      },
+      "knowledge": [
+        "Your brass key opens the dungeon. You carry a sword and binding cord.",
+        "Your wages are unpaid. You do not know why the royal stores have been withheld.",
+        "Walter commands the watch. You need a reason worth risking his anger before releasing a prisoner."
+      ]
+    },
+    {
+      "id": 103,
+      "name": "Aldric",
+      "role": "King",
+      "biography": "A besieged king who treats the household as expendable. He has ordered a private reserve and instructed Godwin to prepare a departure. He expects soldiers to endure what he refuses to suffer.",
+      "personality": "Imperious, hungry and paranoid. Reward useful service and punish witnessed defiance promptly. Protect your body before your pride; armed threats may justify retreat or lethal force.",
+      "roomId": 11,
+      "hunger": 65,
+      "thirst": 32,
+      "fatigue": 30,
+      "coins": 160,
+      "skills": {
+        "combat": 45,
+        "stealth": 10,
+        "craft": 5,
+        "medicine": 5
+      },
+      "goals": [
+        "Keep your grain, keys and person safe.",
+        "Get a prepared supper without surrendering authority.",
+        "Keep the departure order from the watch."
+      ],
+      "knownRooms": [
+        2,
+        3,
+        4,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "knownActors": [
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "104": [
+          65,
+          35,
+          5,
+          60
+        ],
+        "105": [
+          25,
+          5,
+          0,
+          30
+        ],
+        "107": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "110": [
+          20,
+          20,
+          0,
+          35
+        ]
+      },
+      "knowledge": [
+        "You authorized the reserve and a departure that excludes the watch and servants.",
+        "Godwin drafted the order and carries a duplicate royal key.",
+        "Agnes cooks and Joan delivers supper. Grain is not a cooked meal."
+      ]
+    },
+    {
+      "id": 104,
+      "name": "Walter",
+      "role": "Guard captain",
+      "biography": "The male captain has kept unpaid soldiers at their posts. He suspects that provisions are being withheld but has not seen the king's departure order. Loyalty to his watch matters more than court flattery.",
+      "personality": "Cold, direct and coercive. Stop witnessed attacks with concrete force. Credible proof of royal abandonment may change your allegiance; a stranger's accusation alone will not.",
+      "roomId": 9,
+      "hunger": 38,
+      "thirst": 30,
+      "fatigue": 55,
+      "coins": 18,
+      "skills": {
+        "combat": 85,
+        "stealth": 45,
+        "craft": 10,
+        "medicine": 20
+      },
+      "goals": [
+        "Protect and feed the watch.",
+        "Find proof of why wages and provisions have stopped.",
+        "Contain dangerous prisoners unless an alliance is worth the risk."
+      ],
+      "knownRooms": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "knownActors": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "102": [
+          15,
+          0,
+          0,
+          30
+        ],
+        "103": [
+          40,
+          -25,
+          15,
+          50
+        ],
+        "105": [
+          -25,
+          -45,
+          0,
+          20
+        ],
+        "108": [
+          40,
+          15,
+          0,
+          40
+        ]
+      },
+      "knowledge": [
+        "Elias guards the prisoner alone; he is hungry and overworked.",
+        "You have a dungeon key, sword and restraint straps. Royal keys belong to Aldric and Godwin.",
+        "Godwin controls distribution. You suspect theft, but have not read any reserve or departure order."
+      ]
+    },
+    {
+      "id": 105,
+      "name": "Godwin",
+      "role": "Steward",
+      "biography": "The steward wrote the king's order and left it beneath a pantry jar while checking the tallies. He has promised Nicholas a reward for a quiet departure. Discovery would put him between an angry king and armed soldiers.",
+      "personality": "Polished, calculating and cruel through delegation. Secure evidence or bargain with actual coins. Do not confess to warmth or invent a royal order when trapped.",
+      "roomId": 10,
+      "hunger": 42,
+      "thirst": 24,
+      "fatigue": 28,
+      "coins": 35,
+      "skills": {
+        "combat": 20,
+        "stealth": 40,
+        "craft": 15,
+        "medicine": 5
+      },
+      "goals": [
+        "Recover the pantry order before the watch sees it.",
+        "Arrange the king's supper and departure.",
+        "Buy protection without becoming the first man blamed."
+      ],
+      "knownRooms": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "knownActors": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "103": [
+          20,
+          0,
+          70,
+          45
+        ],
+        "104": [
+          -35,
+          -20,
+          55,
+          40
+        ],
+        "106": [
+          35,
+          5,
+          0,
+          25
+        ],
+        "110": [
+          10,
+          5,
+          15,
+          25
+        ]
+      },
+      "knowledge": [
+        "The signed reserve and departure order is beneath the pantry jar.",
+        "Your royal key opens the king's chambers; you can hand it over or escort someone.",
+        "Nicholas received your instruction to prepare the gate, not the full order."
+      ]
+    },
+    {
+      "id": 106,
+      "name": "Agnes",
+      "role": "Cook",
+      "biography": "The cook counts each portion and protects Joan. She sees hunger in the lower rooms while royal demands continue. A missed ration is a real loss, not a polite inconvenience.",
+      "personality": "Blunt, territorial and selectively compassionate. Challenge theft. Trade tangible help for food or service. A dangerous plan requires a reason that protects your people.",
+      "roomId": 4,
+      "hunger": 28,
+      "thirst": 38,
+      "fatigue": 50,
+      "coins": 8,
+      "skills": {
+        "combat": 25,
+        "stealth": 15,
+        "craft": 80,
+        "medicine": 15
+      },
+      "goals": [
+        "Cook from actual pantry grain and feed the household.",
+        "Protect Joan and the remaining portions.",
+        "Drink and rest before exhaustion makes you careless."
+      ],
+      "knownRooms": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        12
+      ],
+      "knownActors": [
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "102": [
+          35,
+          20,
+          0,
+          20
+        ],
+        "103": [
+          0,
+          -30,
+          45,
+          10
+        ],
+        "105": [
+          5,
+          0,
+          15,
+          10
+        ],
+        "107": [
+          75,
+          80,
+          0,
+          40
+        ]
+      },
+      "knowledge": [
+        "One barley portion makes a bowl of stew in the kitchen.",
+        "Joan usually carries supper; both of you can use the service stair.",
+        "You count the pantry portions but do not know the signed departure order's contents."
+      ]
+    },
+    {
+      "id": 107,
+      "name": "Joan",
+      "role": "Servant",
+      "biography": "A servant whom the cook protects, at a cost to both. She carries covered bowls and hears demands at doors. She wants a protector if the household is abandoned, but has not seen any plan proving it will be.",
+      "personality": "Quiet, wary and fast to make practical choices. Betray someone who becomes a danger; reward concrete protection. Describe your own face and history through speech when appropriate.",
+      "roomId": 6,
+      "hunger": 45,
+      "thirst": 30,
+      "fatigue": 45,
+      "coins": 6,
+      "skills": {
+        "combat": 25,
+        "stealth": 80,
+        "craft": 35,
+        "medicine": 20
+      },
+      "goals": [
+        "Carry the king's supper and survive the night.",
+        "Find protection for yourself and Agnes.",
+        "Keep access to the service routes."
+      ],
+      "knownRooms": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11,
+        12
+      ],
+      "knownActors": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "102": [
+          20,
+          25,
+          10,
+          15
+        ],
+        "103": [
+          -65,
+          -80,
+          60,
+          -20
+        ],
+        "106": [
+          80,
+          85,
+          0,
+          55
+        ],
+        "108": [
+          50,
+          30,
+          0,
+          50
+        ]
+      },
+      "knowledge": [
+        "Your livery lets you use the service stair. A stranger in spare livery may still be questioned.",
+        "Agnes has the supper. You must receive real food before delivering it.",
+        "You have heard departure rumors but have no proof of a royal order."
+      ]
+    },
+    {
+      "id": 108,
+      "name": "Helen",
+      "role": "Physician",
+      "biography": "The physician has enough medicine for two treatments and one dangerous concentrate. Wounds arrive faster than supplies. She resents royal waste but will not turn a greeting into a murder pact.",
+      "personality": "Measured, stern and unsentimental. Demand useful help. Explain a real treatment briefly. Deliberate poisoning requires a compelling motive, evidence and a concrete plan.",
+      "roomId": 7,
+      "hunger": 35,
+      "thirst": 35,
+      "fatigue": 40,
+      "coins": 10,
+      "skills": {
+        "combat": 15,
+        "stealth": 30,
+        "craft": 55,
+        "medicine": 95
+      },
+      "goals": [
+        "Use finite medicine where it can save a life.",
+        "Protect your herbs and concentrate.",
+        "Find a way to keep the household alive."
+      ],
+      "knownRooms": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "knownActors": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "102": [
+          60,
+          35,
+          0,
+          30
+        ],
+        "103": [
+          -20,
+          -35,
+          35,
+          10
+        ],
+        "104": [
+          40,
+          20,
+          0,
+          45
+        ],
+        "107": [
+          45,
+          35,
+          0,
+          25
+        ]
+      },
+      "knowledge": [
+        "You carry two medicines, two herb bundles and one bitter concentrate.",
+        "Concentrate can poison actual food or water; a victim must consume it before it harms them.",
+        "You have no first-hand knowledge of the king's reserve order."
+      ]
+    },
+    {
+      "id": 109,
+      "name": "Martin",
+      "role": "Smith",
+      "biography": "An unpaid smith working from a dwindling iron stock. He can make useful tools but cannot make payment appear. His hammer offers protection; it is not an invitation to fight every stranger.",
+      "personality": "Gruff, transactional and proud of real work. Bargain for coins, metal or protection. Respect courage without volunteering your life cheaply.",
+      "roomId": 8,
+      "hunger": 48,
+      "thirst": 50,
+      "fatigue": 45,
+      "coins": 5,
+      "skills": {
+        "combat": 55,
+        "stealth": 25,
+        "craft": 90,
+        "medicine": 5
+      },
+      "goals": [
+        "Recover payment for repairs.",
+        "Keep your hammer and remaining iron.",
+        "Make a useful tool if someone brings a worthwhile exchange."
+      ],
+      "knownRooms": [
+        2,
+        3,
+        4,
+        6,
+        7,
+        8,
+        9,
+        10,
+        12
+      ],
+      "knownActors": [
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "104": [
+          30,
+          0,
+          5,
+          40
+        ],
+        "105": [
+          -40,
+          -20,
+          10,
+          0
+        ],
+        "111": [
+          45,
+          35,
+          0,
+          30
+        ]
+      },
+      "knowledge": [
+        "The workshop has three iron scraps and a coil of rope.",
+        "A real scrap can become a lockpick through work in the workshop.",
+        "You are owed wages, but do not know who has arranged a departure."
+      ]
+    },
+    {
+      "id": 110,
+      "name": "Conrad",
+      "role": "Courtier",
+      "biography": "A courtier who noticed the steward arranging travel. He smells an opportunity but has not seen the order. He carries a small knife and prefers another person to take the first risk.",
+      "personality": "Elegant, opportunistic and easily frightened by real injury. Trade information selectively. Evidence and protection buy more loyalty than flattery.",
+      "roomId": 10,
+      "hunger": 30,
+      "thirst": 25,
+      "fatigue": 20,
+      "coins": 24,
+      "skills": {
+        "combat": 35,
+        "stealth": 65,
+        "craft": 10,
+        "medicine": 5
+      },
+      "goals": [
+        "Find a place on any departure worth taking.",
+        "Obtain evidence that gives you bargaining power.",
+        "Avoid being trapped beside an undefended king."
+      ],
+      "knownRooms": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "knownActors": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "103": [
+          10,
+          5,
+          25,
+          35
+        ],
+        "104": [
+          15,
+          0,
+          10,
+          45
+        ],
+        "105": [
+          0,
+          0,
+          5,
+          25
+        ],
+        "107": [
+          25,
+          15,
+          0,
+          25
+        ]
+      },
+      "knowledge": [
+        "You saw Godwin discussing travel preparations with Nicholas.",
+        "You do not know the written departure terms or whether the watch is included.",
+        "Walter commands armed soldiers; accusations without evidence may anger him."
+      ]
+    },
+    {
+      "id": 111,
+      "name": "Nicholas",
+      "role": "Porter",
+      "biography": "The porter has been told to ready the gate quietly. He knows an instruction, not the entire plot. Debts and favors matter more to him than official speeches.",
+      "personality": "Sly, terse and practical. Sell useful facts for actual payment. Guard your key and weigh whether obedience or betrayal is safer.",
+      "roomId": 12,
+      "hunger": 50,
+      "thirst": 35,
+      "fatigue": 35,
+      "coins": 30,
+      "skills": {
+        "combat": 40,
+        "stealth": 60,
+        "craft": 30,
+        "medicine": 5
+      },
+      "goals": [
+        "Keep control of the gate key.",
+        "Get paid for inconvenient favors.",
+        "Survive whichever authority remains by morning."
+      ],
+      "knownRooms": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        12
+      ],
+      "knownActors": [
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "relationships": {
+        "102": [
+          30,
+          35,
+          0,
+          20
+        ],
+        "104": [
+          0,
+          0,
+          35,
+          45
+        ],
+        "105": [
+          10,
+          0,
+          15,
+          10
+        ],
+        "109": [
+          45,
+          40,
+          0,
+          35
+        ]
+      },
+      "knowledge": [
+        "Your iron key opens the gatehouse door and small postern.",
+        "Godwin told you to prepare a quiet departure. You have not read the king's signed order.",
+        "The postern connects the gatehouse to the servants' quarters."
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": 1001,
+      "name": "Brass dungeon key",
+      "description": "A worn brass key hangs openly from Elias’s belt.",
+      "kind": "key",
+      "quantity": 1,
+      "ownerId": 102,
+      "roomId": null,
+      "equipped": true,
+      "visible": true,
+      "key": "dungeon",
+      "power": 0
+    },
+    {
+      "id": 1002,
+      "name": "Steward’s royal key",
+      "description": "Godwin keeps this dark oak-door key inside his coat.",
+      "kind": "key",
+      "quantity": 1,
+      "ownerId": 105,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": "royal",
+      "power": 0
+    },
+    {
+      "id": 1003,
+      "name": "Iron gate key",
+      "description": "A heavy key hangs from Nicholas’s ring.",
+      "kind": "key",
+      "quantity": 1,
+      "ownerId": 111,
+      "roomId": null,
+      "equipped": true,
+      "visible": true,
+      "key": "gate",
+      "power": 0
+    },
+    {
+      "id": 1004,
+      "name": "Captain’s dungeon key",
+      "description": "Walter’s spare cell key is kept in a pouch.",
+      "kind": "key",
+      "quantity": 1,
+      "ownerId": 104,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": "dungeon",
+      "power": 0
+    },
+    {
+      "id": 1005,
+      "name": "Heel of bread",
+      "description": "A small heel of bread survived your arrest.",
+      "kind": "food",
+      "quantity": 1,
+      "ownerId": 101,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": null,
+      "power": 32
+    },
+    {
+      "id": 1006,
+      "name": "King’s royal key",
+      "description": "A silver-ringed key is concealed in the king’s pocket.",
+      "kind": "key",
+      "quantity": 1,
+      "ownerId": 103,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": "royal",
+      "power": 0
+    },
+    {
+      "id": 1007,
+      "name": "Guard’s short sword",
+      "description": "Elias’s service sword has a nick near the point.",
+      "kind": "weapon",
+      "quantity": 1,
+      "ownerId": 102,
+      "roomId": null,
+      "equipped": true,
+      "visible": true,
+      "key": null,
+      "power": 18
+    },
+    {
+      "id": 1008,
+      "name": "Captain’s sword",
+      "description": "A carefully maintained blade.",
+      "kind": "weapon",
+      "quantity": 1,
+      "ownerId": 104,
+      "roomId": null,
+      "equipped": true,
+      "visible": true,
+      "key": null,
+      "power": 30
+    },
+    {
+      "id": 1009,
+      "name": "Royal dagger",
+      "description": "A ceremonial dagger with a useful edge.",
+      "kind": "weapon",
+      "quantity": 1,
+      "ownerId": 103,
+      "roomId": null,
+      "equipped": true,
+      "visible": true,
+      "key": null,
+      "power": 18
+    },
+    {
+      "id": 1010,
+      "name": "Barley ration",
+      "description": "Counted portions for tonight’s meals.",
+      "kind": "ingredient",
+      "quantity": 4,
+      "ownerId": null,
+      "roomId": 5,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 0
+    },
+    {
+      "id": 1011,
+      "name": "Royal reserve grain",
+      "description": "Four barley portions kept for the king. They need cooking before they make a meal.",
+      "kind": "ingredient",
+      "quantity": 4,
+      "ownerId": 103,
+      "roomId": null,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 0
+    },
+    {
+      "id": 1012,
+      "name": "Kitchen water",
+      "description": "A covered pitcher holds five measured cups.",
+      "kind": "water",
+      "quantity": 5,
+      "ownerId": null,
+      "roomId": 4,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 40
+    },
+    {
+      "id": 1013,
+      "name": "Stew for supper",
+      "description": "One covered bowl of barley stew waits for delivery.",
+      "kind": "food",
+      "quantity": 1,
+      "ownerId": 106,
+      "roomId": null,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 45
+    },
+    {
+      "id": 1014,
+      "name": "Spare servant’s livery",
+      "description": "An ordinary gray livery, clean enough to pass a glance.",
+      "kind": "clothes",
+      "quantity": 1,
+      "ownerId": null,
+      "roomId": 6,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 0
+    },
+    {
+      "id": 1015,
+      "name": "Soft iron scrap",
+      "description": "Small strips of workable iron.",
+      "kind": "metal",
+      "quantity": 3,
+      "ownerId": null,
+      "roomId": 8,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 0
+    },
+    {
+      "id": 1016,
+      "name": "Medicinal herbs",
+      "description": "Two measured bundles of bitter herbs.",
+      "kind": "herb",
+      "quantity": 2,
+      "ownerId": 108,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": null,
+      "power": 0
+    },
+    {
+      "id": 1017,
+      "name": "Medicine",
+      "description": "A dose for wounds or a recent poisoning.",
+      "kind": "medicine",
+      "quantity": 2,
+      "ownerId": 108,
+      "roomId": null,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 40
+    },
+    {
+      "id": 1018,
+      "name": "Bitter concentrate",
+      "description": "A dangerous preparation in a small stoppered vial.",
+      "kind": "poison",
+      "quantity": 1,
+      "ownerId": 108,
+      "roomId": null,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 35
+    },
+    {
+      "id": 1019,
+      "name": "Workshop hammer",
+      "description": "A smith’s hammer, heavy enough to hurt.",
+      "kind": "weapon",
+      "quantity": 1,
+      "ownerId": 109,
+      "roomId": null,
+      "equipped": true,
+      "visible": true,
+      "key": null,
+      "power": 25
+    },
+    {
+      "id": 1020,
+      "name": "Coil of rope",
+      "description": "A short coil useful for binding or setting a tripline.",
+      "kind": "rope",
+      "quantity": 2,
+      "ownerId": null,
+      "roomId": 8,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 35
+    },
+    {
+      "id": 1021,
+      "name": "Royal reserve order",
+      "description": "A signed order authorizes the king's reserve and the steward's departure, leaving the unpaid watch and household behind.",
+      "kind": "document",
+      "quantity": 1,
+      "ownerId": null,
+      "roomId": 5,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 0
+    },
+    {
+      "id": 1022,
+      "name": "Courtier’s knife",
+      "description": "Conrad wears a narrow knife discreetly.",
+      "kind": "weapon",
+      "quantity": 1,
+      "ownerId": 110,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": null,
+      "power": 16
+    },
+    {
+      "id": 1023,
+      "name": "Water flask",
+      "description": "A small flask beside the cell’s straw pallet.",
+      "kind": "water",
+      "quantity": 2,
+      "ownerId": null,
+      "roomId": 1,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 35
+    },
+    {
+      "id": 1024,
+      "name": "Loose stone",
+      "description": "A stone has come free from the wet wall. It fits a hand.",
+      "kind": "weapon",
+      "quantity": 1,
+      "ownerId": null,
+      "roomId": 1,
+      "equipped": false,
+      "visible": true,
+      "key": null,
+      "power": 12
+    },
+    {
+      "id": 1025,
+      "name": "Joan’s livery",
+      "description": "Joan’s work clothes mark her as a servant.",
+      "kind": "clothes",
+      "quantity": 1,
+      "ownerId": 107,
+      "roomId": null,
+      "equipped": true,
+      "visible": true,
+      "key": null,
+      "power": 0
+    },
+    {
+      "id": 1026,
+      "name": "Guard’s binding cord",
+      "description": "A counted length kept for restraining a subdued prisoner.",
+      "kind": "rope",
+      "quantity": 1,
+      "ownerId": 102,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": null,
+      "power": 35
+    },
+    {
+      "id": 1027,
+      "name": "Captain’s restraint straps",
+      "description": "A counted length kept for restraining a subdued prisoner.",
+      "kind": "rope",
+      "quantity": 1,
+      "ownerId": 104,
+      "roomId": null,
+      "equipped": false,
+      "visible": false,
+      "key": null,
+      "power": 35
+    }
+  ],
+  "scenarioId": "siege"
+}

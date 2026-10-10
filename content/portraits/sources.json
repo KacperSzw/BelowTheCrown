@@ -1,0 +1,379 @@
+{
+  "actors": {
+    "102": "face-00",
+    "103": "face-01",
+    "104": "captain",
+    "105": "face-02",
+    "106": "face-08",
+    "107": "face-09",
+    "108": "face-10",
+    "109": "face-03",
+    "110": "face-04",
+    "111": "face-05"
+  },
+  "portraits": [
+    {
+      "key": "captain",
+      "file": "sources/captain.png",
+      "crop": [
+        0.1,
+        0,
+        0.8,
+        0.85
+      ],
+      "gamma": 1.3
+    },
+    {
+      "key": "face-00",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0,
+        0,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-01",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0.25,
+        0,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-02",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0.5,
+        0,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-03",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0.75,
+        0,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-04",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0,
+        0.25,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-05",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0.25,
+        0.25,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-06",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0.5,
+        0.25,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-07",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0.75,
+        0.25,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-08",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0,
+        0.5,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-09",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0.25,
+        0.5,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-10",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0.5,
+        0.5,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-11",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0.75,
+        0.5,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-12",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0,
+        0.75,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-13",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0.25,
+        0.75,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-14",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0.5,
+        0.75,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-15",
+      "file": "sources/atlas-a.png",
+      "crop": [
+        0.75,
+        0.75,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-16",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0,
+        0,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-17",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0.25,
+        0,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-18",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0.5,
+        0,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-19",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0.75,
+        0,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-20",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0,
+        0.25,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-21",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0.25,
+        0.25,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-22",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0.5,
+        0.25,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-23",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0.75,
+        0.25,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-24",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0,
+        0.5,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-25",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0.25,
+        0.5,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-26",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0.5,
+        0.5,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-27",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0.75,
+        0.5,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-28",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0,
+        0.75,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-29",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0.25,
+        0.75,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-30",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0.5,
+        0.75,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    },
+    {
+      "key": "face-31",
+      "file": "sources/atlas-b.png",
+      "crop": [
+        0.75,
+        0.75,
+        0.25,
+        0.25
+      ],
+      "gamma": 1.1
+    }
+  ]
+}
