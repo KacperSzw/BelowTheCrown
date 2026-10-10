@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, bail, ensure};
 use below_the_crown::{
     codex::{
-        CodexDriver, DecisionDriver, RecallRequest, ThinkRequest, WorkerOptions, WorkerSpec,
-        safe_error,
+        CodexDriver, DecisionDriver, DecisionToken, RecallRequest, ThinkRequest, WorkerOptions,
+        WorkerSpec, safe_error,
     },
     content::WorldContent,
     engine::Engine,
@@ -86,6 +86,12 @@ struct HostArgs {
     port: Option<u16>,
     #[arg(long,value_parser=clap::value_parser!(u8).range(1..=32))]
     max_players: Option<u8>,
+    /// Maximum simultaneous NPC and speech-interpreter decisions.
+    #[arg(long,value_parser=clap::value_parser!(u8).range(1..=32))]
+    max_agents: Option<u8>,
+    /// Passive NPC thinking rate: 1, 5 or 15. Events remain immediate.
+    #[arg(long, value_parser=parse_npc_update_rate)]
+    npc_update_rate: Option<u8>,
     #[arg(long,value_parser=["en","pl"])]
     language: Option<String>,
     #[arg(long)]
@@ -152,6 +158,46 @@ fn settings(directory: &Path) -> Result<Value> {
     let value: Value = serde_json::from_slice(&bytes)?;
     ensure!(value.is_object(), "Invalid server settings");
     Ok(value)
+}
+fn initial_agent_limit(cli: Option<u8>, settings: &Value) -> Result<usize> {
+    let value = match cli {
+        Some(value) => u64::from(value),
+        None => match settings.get("maxAgents") {
+            Some(value) => value
+                .as_u64()
+                .context("Maximum agents must be an integer between 1 and 32")?,
+            None => 5,
+        },
+    };
+    ensure!(
+        (1..=32).contains(&value),
+        "Maximum agents must be between 1 and 32"
+    );
+    Ok(value as usize)
+}
+fn parse_npc_update_rate(value: &str) -> std::result::Result<u8, String> {
+    match value {
+        "1" => Ok(1),
+        "5" => Ok(5),
+        "15" => Ok(15),
+        _ => Err("NPC update rate must be 1, 5 or 15".into()),
+    }
+}
+fn initial_npc_update_rate(cli: Option<u8>, settings: &Value) -> Result<u8> {
+    let value = match cli {
+        Some(value) => u64::from(value),
+        None => match settings.get("npcUpdateRate") {
+            Some(value) => value
+                .as_u64()
+                .context("NPC update rate must be an integer: 1, 5 or 15")?,
+            None => 5,
+        },
+    };
+    ensure!(
+        matches!(value, 1 | 5 | 15),
+        "NPC update rate must be 1, 5 or 15"
+    );
+    Ok(value as u8)
 }
 
 fn selected_network(options: &HostArgs, previous: &Value) -> Result<Network> {
@@ -223,11 +269,15 @@ async fn host(directory: &Path, options: HostArgs) -> Result<()> {
         .unwrap_or(2222);
     ensure!(port > 0, "Choose a nonzero SSH port");
     let maximum = usize::from(options.max_players.unwrap_or(8));
+    let max_agents = initial_agent_limit(options.max_agents, &previous)?;
+    let npc_update_rate = initial_npc_update_rate(options.npc_update_rate, &previous)?;
     let mut engine = Engine::open(directory, &scenario, &language, manager::seed())?;
     let mut setup = Setup {
         language,
         scenario,
         network,
+        max_agents,
+        npc_update_rate,
         start: options.save.as_ref().map_or(
             if options.new {
                 Start::New
@@ -283,11 +333,17 @@ async fn host(directory: &Path, options: HostArgs) -> Result<()> {
             Start::Resume => {}
         }
     }
+    let mut chosen_settings = previous;
+    chosen_settings["language"] = json!(setup.language);
+    chosen_settings["scenario"] = json!(setup.scenario);
+    chosen_settings["bind"] = json!(setup.network.address);
+    chosen_settings["subnet"] = json!(setup.network.subnet);
+    chosen_settings["port"] = json!(port);
+    chosen_settings["maxAgents"] = json!(setup.max_agents);
+    chosen_settings["npcUpdateRate"] = json!(setup.npc_update_rate);
     paths::write_private(
         &directory.join("server-settings.json"),
-        &serde_json::to_vec(
-            &json!({"language":setup.language,"scenario":setup.scenario,"bind":setup.network.address,"subnet":setup.network.subnet,"port":port}),
-        )?,
+        &serde_json::to_vec(&chosen_settings)?,
         false,
     )?;
     // Selecting Start begins the host; absence of players still freezes its clock.
@@ -299,7 +355,11 @@ async fn host(directory: &Path, options: HostArgs) -> Result<()> {
         port,
         maximum_players: maximum,
     };
-    let (simulation, handle) = Simulation::production(engine, info, worker)?;
+    let (mut simulation, handle) = Simulation::production(engine, info, worker)?;
+    simulation.scheduling.maximum_calls = setup.max_agents;
+    simulation
+        .scheduling
+        .set_npc_update_rate(setup.npc_update_rate)?;
     simulation.preflight().await?;
     let mut ssh = ssh::serve(handle.clone(), ssh_options).await?;
     let mut ipc = match manager::IpcServer::open(directory, handle.clone()).await {
@@ -377,6 +437,11 @@ async fn doctor(directory: &Path, options: DoctorArgs) -> Result<()> {
         let cancel = CancellationToken::new();
         let request = ThinkRequest {
             actor_id: 102,
+            identity: Some(engine.npc_identity(102)?),
+            token: DecisionToken {
+                job_id: 1,
+                context_generation: 0,
+            },
             branch: engine.world.branch.clone(),
             input: observation["input"].clone(),
             listener: false,
@@ -405,10 +470,66 @@ async fn doctor(directory: &Path, options: DoctorArgs) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn npc_rate_uses_cli_then_saved_value_and_rejects_invalid_saved_settings() {
+        assert_eq!(initial_npc_update_rate(None, &json!({})).unwrap(), 5);
+        for rate in [1, 5, 15] {
+            assert_eq!(
+                initial_npc_update_rate(None, &json!({"npcUpdateRate":rate})).unwrap(),
+                rate
+            );
+            assert_eq!(
+                initial_npc_update_rate(Some(rate), &json!({"npcUpdateRate":"bad"})).unwrap(),
+                rate
+            );
+            assert!(
+                Cli::try_parse_from(["btc", "host", "--npc-update-rate", &rate.to_string()])
+                    .is_ok()
+            );
+        }
+        for value in [
+            json!(0),
+            json!(2),
+            json!(16),
+            json!(5.5),
+            json!("5"),
+            Value::Null,
+        ] {
+            assert!(initial_npc_update_rate(None, &json!({"npcUpdateRate":value})).is_err());
+        }
+        for value in ["0", "2", "16", "5.5"] {
+            assert!(Cli::try_parse_from(["btc", "host", "--npc-update-rate", value]).is_err());
+        }
+    }
+    #[test]
+    fn agent_limit_uses_cli_then_saved_setting_then_five() {
+        assert_eq!(initial_agent_limit(None, &json!({})).unwrap(), 5);
+        assert_eq!(
+            initial_agent_limit(None, &json!({"maxAgents":9})).unwrap(),
+            9
+        );
+        assert_eq!(
+            initial_agent_limit(Some(3), &json!({"maxAgents":9})).unwrap(),
+            3
+        );
+        assert_eq!(
+            initial_agent_limit(Some(3), &json!({"maxAgents":"bad"})).unwrap(),
+            3
+        );
+        for value in [json!(0), json!(33), json!(2.5), json!("5"), Value::Null] {
+            assert!(initial_agent_limit(None, &json!({"maxAgents":value})).is_err());
+        }
+    }
+    #[test]
     fn cli_has_only_host_controls_and_checks_input() {
         assert!(Cli::try_parse_from(["below-the-crown", "play"]).is_err());
         assert!(Cli::try_parse_from(["btc", "host", "--new", "--save", "s"]).is_err());
         assert!(Cli::try_parse_from(["btc", "host", "--max-players", "33"]).is_err());
+        for value in ["0", "33", "-1", "2.5"] {
+            assert!(Cli::try_parse_from(["btc", "host", "--max-agents", value]).is_err());
+        }
+        for value in ["1", "7", "32"] {
+            assert!(Cli::try_parse_from(["btc", "host", "--max-agents", value]).is_ok());
+        }
         assert!(Cli::try_parse_from(["btc", "host", "--language", "de"]).is_err());
         assert!(
             Cli::try_parse_from([

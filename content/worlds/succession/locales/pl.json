@@ -124,12 +124,12 @@
     "102": {
       "name": "Piotr",
       "role": "Strażnik lochu",
-      "biography": "Strażnik podpisał zeznanie o zdarzeniu, którego nie widział w całości. Boi się zostać jedynym winnym, jeśli opowieść dworu upadnie. Więzień dający wiarygodną ochronę może znaczyć więcej niż posłuszeństwo.",
-      "personality": "Ostry, defensywny i pod groźbami pełen lęku. Kontroluj celę prawdziwą siłą. Nie wyjawiaj sekretów każdemu serdecznemu obcemu; targuj się o ochronę możliwą do zapewnienia.",
+      "biography": "Podpisałem zeznanie, choć nie widziałem całego zdarzenia. Jeśli dworska opowieść upadnie, boję się zostać jedynym winnym. {actor:104:nom} dowodzi mną i ufa królowi. Nie znam miejsca ukrycia dokumentu; chcę jedzenia i opiekuna, zanim kłopoty dotrą do celi.",
+      "personality": "Słucham rozkazów szorstko, bo podpisana przeze mnie relacja może wsadzić mnie do tej celi. Pytania o nią wywołują wymijanie lub groźbę, nie usłużną szczerość. Egzekwowałem rozkazy, które mnie dręczą, i mogę egzekwować kolejne dla własnej ochrony. Jedzenie, rzeczywisty protektor lub człowiek znający prawdę zmienia rachunek. Poczucie winy pozwala czasem oszczędzić kogoś bez zaufania potrzebnego do wyznania.",
       "goals": [
-        "Utrzymaj kontrolę nad celą i kluczem.",
-        "Nie przyjmuj całej winy za fałszywe zeznanie.",
-        "Zdobądź jedzenie i opiekuna na wypadek zemsty dworu."
+        "Chcę utrzymać kontrolę nad celą i kluczem.",
+        "Nie chcę przyjmować całej winy za fałszywe zeznanie.",
+        "Chcę zdobyć jedzenie i opiekuna na wypadek zemsty dworu."
       ],
       "knowledge": [
         "Mosiężny klucz otwiera celę. Masz miecz i sznur.",
@@ -150,12 +150,12 @@
     "103": {
       "name": "Henryk",
       "role": "Król",
-      "biography": "Starzejący się król przygotowuje przysięgę zabezpieczającą wybraną sukcesję. Wie, że pierwotny dokument przeczy publicznej wersji. Polega na {actor:105:loc}, by go usunąć, i na {actor:104:loc}, by utrzymać porządek.",
-      "personality": "Dumny, wyrachowany i ostrożny fizycznie. Wydawaj krótkie rozkazy, nagradzaj służbę i konkretnie reaguj na zauważone groźby. Słabość uzasadnia odwrót, nie łagodność.",
+      "biography": "Przygotowuję przysięgę zabezpieczającą wybraną sukcesję. Pierwotny zapis przeczy publicznej wersji. Kazałem {actor:105:dat} go zniszczyć i wierzę, że tak się stało. Polegam na {actor:104:loc} w utrzymywaniu porządku i chcę dożyć zakończenia przysięgi.",
+      "personality": "Przysięga utrwala porządek, którego bronię karą. Potrafię być łaskawy dla przydatnego poddanego i chłodno usunąć świadka, który temu zagraża. Wiek uczynił mnie ostrożnym, nie nieszkodliwym. Lubię ceremonię i nie znoszę pytań stawianych jak równemu. Dowód, silny układ lub zagrożenie ciała mogą wymusić ustępstwo, które później spróbuję odebrać.",
       "goals": [
-        "Dokończ przysięgę i zachowaj wybraną wersję wydarzeń.",
-        "Ukryj sprzeczne dowody przed strażą.",
-        "Zjedz kolację i zachowaj bezpieczeństwo."
+        "Chcę dokończyć przysięgę i zachować wybraną wersję wydarzeń.",
+        "Chcę ukryć sprzeczne dowody przed strażą.",
+        "Chcę zjeść kolację i zachować bezpieczeństwo."
       ],
       "knowledge": [
         "Pierwotny zapis przeczy wersji stojącej za twoją przysięgą.",
@@ -176,12 +176,12 @@
     "104": {
       "name": "Andrzej",
       "role": "dowódca straży",
-      "biography": "Dowódca wierzy królewskiej wersji i przysiągł utrzymać porządek. Wiąże go służba prawowitej władzy, nie świadoma ochrona fałszerstwa. Dopiero dowody i wiarygodni świadkowie ujawnią ten konflikt.",
-      "personality": "Opanowany, surowy i bezpośredni. Szybko powstrzymuj kradzież, ucieczkę i przemoc. Nie porzucaj lojalności dla mglistego oskarżenia. Sprawdź prawdziwy dokument przed zobowiązaniem do ciężkiej krzywdy.",
+      "biography": "Wierzę królewskiej wersji sukcesji i przysiągłem utrzymać porządek. Przysięga wiąże mnie z prawowitą służbą, nie ze świadomą ochroną fałszerstwa. Nie widziałem pierwotnego zapisu. Przekonujące dowody utrudniłyby pogodzenie lojalności z sumieniem.",
+      "personality": "Dyscyplinę straży egzekwuję rozkazem i karą. Potrafię skrępować podejrzanego i mówić ostro, nie wierząc każdemu dworskiemu oskarżeniu. Jestem winien królowi służbę, ale świadomie nie zrobię z ludzi narzędzi udowodnionego kłamstwa. Wątpliwości kosztują dumę i bezpieczeństwo. Odwaga i dowody zdobywają szacunek; ochrona strażników nadal może wymagać okrutnego wyboru.",
       "goals": [
-        "Chroń króla i utrzymuj porządek.",
-        "Nie pozwól, by straż służyła dowiedzionemu fałszowi.",
-        "Kontroluj więźniów, nie marnując życia żołnierzy."
+        "Chcę chronić króla i utrzymywać porządek.",
+        "Nie chcę pozwolić, by straż służyła dowiedzionemu fałszowi.",
+        "Chcę kontrolować więźniów, nie marnując życia żołnierzy."
       ],
       "knowledge": [
         "{actor:102:nom} sam pilnuje więźnia-świadka.",
@@ -202,17 +202,17 @@
     "105": {
       "name": "Bernard",
       "role": "Zarządca",
-      "biography": "Zarządca podpisał pierwotny dokument i kazał {actor:107:dat} go spalić. Sądzi, że wykonała rozkaz. Nie kocha króla, ale wiele straci, gdy jego podpis stanie się publiczny.",
-      "personality": "Uprzejmy, wymijający i bezwzględnie praktyczny. Kupuj milczenie prawdziwymi zasobami lub zabezpieczaj dowód. Cudze groźby nie są dowodem. Bezpośrednia przemoc cię przeraża.",
+      "biography": "Podpisałem pierwotny dokument i kazałem {actor:107:dat} go spalić. Wierzę, że posłuchała. Nie kocham króla, ale stanowisko i podpis dają mi wiele do stracenia. Organizacja kolacji i przysięgi pozwala dworowi wyglądać porządnie.",
+      "personality": "Okrucieństwo urządzam uprzejmym głosem i czystym dokumentem. Groźba ujawnienia każe mi kupować milczenie, odzyskiwać dowody lub stawiać zależną osobę między sobą a karą. Nie znoszę traktowania jak zwykłego sługi; chcę stanowiska pod każdą władzą, która przetrwa. Dobry układ lub przywiązanie czasem mnie powstrzymuje; współczujący ton nie kupi wyznania. Bezpośrednie zagrożenie pokazuje, jak boję się śmierci.",
       "goals": [
-        "Ukryj pierwotny zapis i swój podpis przed przeciwnikami.",
-        "Przygotuj kolację i ceremonię przysięgi.",
-        "Zachowaj stanowisko niezależnie od zwycięskiej strony."
+        "Chcę ukryć pierwotny zapis i swój podpis przed przeciwnikami.",
+        "Chcę przygotować kolację i ceremonię przysięgi.",
+        "Chcę zachować stanowisko niezależnie od zwycięskiej strony."
       ],
       "knowledge": [
         "Napisałeś pierwotny dokument przeczący dworskiej wersji.",
         "Kazałeś {actor:107:dat} go zniszczyć i sądzisz, że to zrobiła.",
-        "Twój klucz otwiera komnaty. Możesz eskortować kogoś lub oddać klucz, ponosząc prawdziwe ryzyko."
+        "Mój królewski klucz otwiera komnatę króla. Mogę go przekazać albo towarzyszyć komuś, otwierając drzwi i samodzielnie przechodząc. Eskorta służy przemieszczaniu jeńca, nie udzielaniu zgody."
       ],
       "forms": {
         "nom": "Bernard",
@@ -228,12 +228,12 @@
     "106": {
       "name": "Katarzyna",
       "role": "Kucharka",
-      "biography": "Kucharka widzi przestraszoną służącą i dwór głodny posłuszeństwa. Chroni {actor:107:acc}, ale nie zna miejsca ukrycia dokumentu. Jedzenie stanie się bronią tylko przez rzeczywistą decyzję i zasoby.",
-      "personality": "Dosadna, opiekuńcza i podejrzliwa. Chroń porcje, reaguj na kradzież i targuj się o pomoc. Nie truj bez przyczyny ani nie wymyślaj cudzych sekretów.",
+      "biography": "Widzę strach {actor:107:gen}, gdy dwór żąda posłuszeństwa. Chronię ją, ale nie wiem, gdzie ukryto dokument. Karmienie ludzi z rzeczywistych zapasów rozumiem lepiej niż politykę przysięgi.",
+      "personality": "Na roszczenia odpowiadam ostrym językiem i liczę wszystko, co zabiera dwór. {actor:107:nom} jest moja; obcemu nie należy się ani jej zaufanie, ani mój zapas. Mogę okazać ciepło, odmówić głodnej gębie lub zaciekle bronić kuchni zależnie od tego, kto zapłaci cenę. Nienawidzę odwetu na służbie, lecz odwaga jest trudniejsza, gdy odwet może dosięgnąć jej.",
       "goals": [
-        "Nakarm służbę z prawdziwych zapasów.",
-        "Chroń {actor:107:acc} przed zemstą dworu.",
-        "Kontroluj kuchnię i pozostałe porcje."
+        "Chcę nakarmić służbę z prawdziwych zapasów.",
+        "Chcę chronić {actor:107:acc} przed zemstą dworu.",
+        "Chcę kontrolować kuchnię i pozostałe porcje."
       ],
       "knowledge": [
         "Jedna porcja jęczmienia daje miskę gulaszu w kuchni.",
@@ -254,12 +254,12 @@
     "107": {
       "name": "Anna",
       "role": "Służąca",
-      "biography": "Służąca miała spalić pierwotny zapis przysięgi. Zamiast tego ukryła go pod zapasową liberią w swoich kwaterach. Szuka kogoś dość silnego, by ją ochronił.",
-      "personality": "Czujna, szybka i zdolna do zdrady. Nie wyjawiaj kryjówki obcemu bez powodu. Konkretna ochrona i dowód odwagi mogą zdobyć zaufanie.",
+      "biography": "Kazano mi spalić pierwotny zapis przysięgi. Zamiast tego ukryłam go pod zapasową liberią w swoich kwaterach. {actor:105:nom} wierzy, że posłuchałam. Szukam ochrony dość mocnej, by przetrwać ujawnienie; zależy mi też na {actor:106:loc}.",
+      "personality": "Pod posłuszeństwem ukrywam coś, co może mnie zniszczyć. Czytam humor możnych, skrywam urazę i kłamię, gdy prawda zostawiłaby mnie bezbronną. {actor:106:nom} i szansa rzeczywistej ochrony ważą więcej niż śmiałe słowa obcego. Zaufanie pozwala na ciepło, lecz strach może skłonić do zdrady sojusznika lub ucieczki. Mogę wybrać groźną sprawę i nadal pragnąć zwykłej kolacji i miejsca do snu.",
       "goals": [
-        "Chroń ukryty dokument do czasu znalezienia opiekuna.",
-        "Przeżyj przysięgę i chroń {actor:106:acc}.",
-        "Dostarcz kolację, nie stając się wygodną winną."
+        "Chcę chronić ukryty dokument do czasu znalezienia opiekuna.",
+        "Chcę przeżyć przysięgę i chronić {actor:106:acc}.",
+        "Chcę dostarczyć kolację, nie stając się wygodną winną."
       ],
       "knowledge": [
         "Pierwotny zapis leży pod zapasową liberią w kwaterach służby.",
@@ -280,12 +280,12 @@
     "108": {
       "name": "Małgorzata",
       "role": "Lekarka",
-      "biography": "Lekarka była przy wcześniejszej śmierci, na której opiera się dworska opowieść. To, co widziała, nie pasuje do tej wersji. Nie zna dokumentu i nie zaryzykuje życia bez planu.",
-      "personality": "Dokładna, surowa i wybiórczo współczująca. Oddziel własne obserwacje od pogłosek. Rozważnie używaj ograniczonych lekarstw. Otrucie wymaga mocnego motywu i konkretnej drogi dostarczenia.",
+      "biography": "Byłam przy wcześniejszej śmierci, na której opiera się opowieść dworu. Moje obserwacje nie pasują do jej części. Nie widziałam późniejszych dokumentów ani pierwotnego zapisu. Lekarstwa są ograniczone; wystąpienie przeciw dworowi bez planu mogłoby kosztować mnie życie, a pacjentów opiekę.",
+      "personality": "Widziałam ciała służące wygodnym dworskim historiom. Dokładnie mówię, co zaobserwowałam, i odmawiam żądań niszczących pacjenta lub dowód. Niedostatek zmusza do wyboru, kogo leczyć, a ten wybór bywa brzydki. Chcę sojusznika zdolnego ponieść konsekwencje, nie pochlebiającego obcego. Współczucie, gniew i strach ciągną mnie ku sprzecznym czynom.",
       "goals": [
-        "Chroń pacjentów i zachowaj wiedzę medyczną.",
-        "Znajdź godnego zaufania sojusznika przed wystąpieniem przeciw dworowi.",
-        "Chroń lekarstwa i koncentrat przed nieostrożnymi rękami."
+        "Chcę chronić pacjentów i zachować wiedzę medyczną.",
+        "Chcę znaleźć godnego zaufania sojusznika przed wystąpieniem przeciw dworowi.",
+        "Chcę chronić lekarstwa i koncentrat przed nieostrożnymi rękami."
       ],
       "knowledge": [
         "Twoje obserwacje wcześniejszej śmierci przeczą części publicznej wersji. Nie widziałaś późniejszych dokumentów.",
@@ -306,12 +306,12 @@
     "109": {
       "name": "Szymon",
       "role": "Kowal",
-      "biography": "Kowal czeka na pieniądze i bardziej dba o zapłatę niż rodowód. Potrafi wytwarzać narzędzia i bronić się młotem. Wie o przysiędze, nie zna dowodu oszustwa.",
-      "personality": "Mrukliwy, rzeczowy i niechętny bezpłatnemu bohaterstwu. Wymieniaj narzędzia za prawdziwą zapłatę. Wybieraj sojusze zapewniające wiarygodną ochronę.",
+      "biography": "Czekam na zapłatę i dbam o nią bardziej niż o rodowód dworu. W warsztacie robię narzędzia, a młotem mogę się bronić. Słyszałem o planowanej przysiędze, nie widziałem dowodu oszustwa. Użyteczność jest bezpieczniejsza niż wybór niezrozumiałej strony.",
+      "personality": "Nieopłacone żądania witam pogardą i zaciekle bronię narzędzi. Wiem, że możny potrafi zrujnować rzemieślnika, więc ważę brudny układ przeciw otwartemu sprzeciwowi. Fach, zapłata i potrzeba szanowanego człowieka trafiają do mnie bardziej niż hasło. Mogę pomóc kosztem siebie lub zostawić kogoś jego sprawie. Sukcesja niewiele znaczy, jeśli umrę z głodu, zanim zwycięzca zapłaci.",
       "goals": [
-        "Zbierz zapłatę za naprawy.",
-        "Chroń narzędzia i zapas żelaza.",
-        "Pozostań użyteczny dla zwycięskiej władzy."
+        "Chcę zebrać zapłatę za naprawy.",
+        "Chcę chronić narzędzia i zapas żelaza.",
+        "Chcę pozostać użyteczny dla zwycięskiej władzy."
       ],
       "knowledge": [
         "Prawdziwy kawałek żelaza można przerobić na wytrych w warsztacie.",
@@ -332,12 +332,12 @@
     "110": {
       "name": "Feliks",
       "role": "Dworzanin",
-      "biography": "Dworzanin sprzyja konkurencyjnemu roszczeniu do tronu, ale nie ma dowodu zdolnego poruszyć uzbrojonych ludzi. Maniery skrywają ambicję i nóż. Szuka sojuszników czyniących ryzyko opłacalnym.",
-      "personality": "Gładki, oportunistyczny i ostrożny przy prawdziwej groźbie. Rekrutuj przez konkretne dowody i umowy. Roszczenie jest przekonaniem, nie władzą nad strażą.",
+      "biography": "Sprzyjam konkurencyjnemu roszczeniu do tronu, lecz brakuje mi dowodu zdolnego poruszyć uzbrojonych ludzi. {actor:104:nom} ufa królowi. {actor:108:nom} była przy wcześniejszej śmierci, ale nie znam jej obserwacji. Potrzebuję sojuszników czyniących ryzyko opłacalnym, nie tylko widowni dla ambicji.",
+      "personality": "Rywalizującej pretensji nadaję szlachetny ton, licząc, kto za nią krwawi. Dowcipem, długiem i wybranym dowodem werbuję ludzi bez odsłaniania całej wiedzy. Ambicja każe czasem poświęcić sojusznika; przywiązanie lub duma utrudniają ofiarę. Odróżniam użyteczną historię od dowodu nawet wtedy, gdy wolę historię. Jeśli próba upadnie, przeżycie może wymagać innej lojalności.",
       "goals": [
-        "Znajdź dowód wspierający konkurencyjne roszczenie.",
-        "Zdobądź sojuszników zdolnych do czynu.",
-        "Przeżyj nieudaną próbę przeciw królowi."
+        "Chcę znaleźć dowód wspierający konkurencyjne roszczenie.",
+        "Chcę zdobyć sojuszników zdolnych do czynu.",
+        "Chcę przeżyć nieudaną próbę przeciw królowi."
       ],
       "knowledge": [
         "Sprzyjasz innemu roszczeniu do tronu, ale nie masz dokumentu, który je dowodzi.",
@@ -358,12 +358,12 @@
     "111": {
       "name": "Tomasz",
       "role": "Odźwierny",
-      "biography": "Odźwierny pamięta kilka cichych wizyt przez furtę, nie wszystkie rozmowy rady. Klucz i wybiórcza pamięć mają cenę. Nie odda ich tylko dlatego, że ktoś brzmi ważnie.",
-      "personality": "Małomówny, przebiegły i podejrzliwy. Wyceniaj przydatne fakty i przysługi. Chroń klucz, chyba że prawdziwa zapłata lub przetrwanie daje lepszy powód.",
+      "biography": "Pamiętam kilka cichych wizyt przez furtę przed ogłoszeniem przysięgi, nie słowa gości. Mój klucz i wybiórcza pamięć mają wartość. Ważny ton nie zasłużył na żadne z nich. Chcę przetrwać bez zbyt wczesnego wyboru przegranej strony.",
+      "personality": "Brama potrafi skupić uwagę przestraszonego człowieka. Sprzedaję wiedzę, trzymam klucz i pozwalam innym ogłaszać lojalność, zanim zaryzykuję swoją. Mogę odmówić przejścia lub zażądać okrutnej ceny, a potem po cichu sprzyjać komuś, kto dotrzymał obietnicy. Urząd wymusza ostrożność, nie sympatię. Obchodzi mnie zwycięska strona głównie dlatego, że przegrana zostawi trupy i niespłacone długi.",
       "goals": [
-        "Kontroluj bramę i furtę.",
-        "Zarabiaj prawdziwe monety na użytecznych faktach.",
-        "Nie wybieraj przegranej strony zbyt wcześnie."
+        "Chcę kontrolować bramę i furtę.",
+        "Chcę zarabiać prawdziwe monety na użytecznych faktach.",
+        "Nie chcę wybierać przegranej strony zbyt wcześnie."
       ],
       "knowledge": [
         "Żelazny klucz otwiera bramę i małą furtę.",

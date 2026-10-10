@@ -1,5 +1,6 @@
 use crate::paths::{find_executable, private_dir, write_private};
 use anyhow::{Context, Result, bail, ensure};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
@@ -25,6 +26,7 @@ pub struct WorkerSpec {
     pub env: BTreeMap<OsString, OsString>,
     pub codex: PathBuf,
     pub private_home: PathBuf,
+    version: String,
 }
 
 fn native(path: &Path) -> bool {
@@ -125,9 +127,15 @@ pub fn worker_config() -> String {
         "tool_suggest",
         "workspace_dependencies",
         "fast_mode",
+        "code_mode_only",
+        "current_time_reminder",
+        "token_budget",
+        "deferred_executor",
+        "send_message_to_user_async",
+        "recommended_plugins",
     ];
     format!(
-        "model = \"gpt-6-luna\"\nmodel_reasoning_effort = \"high\"\nservice_tier = \"default\"\napproval_policy = \"never\"\nsandbox_mode = \"read-only\"\nweb_search = \"disabled\"\nproject_doc_max_bytes = 0\ncli_auth_credentials_store = \"file\"\n[features]\n{}\nskip_host_skill_discovery = true\n[tools.update_plan]\nenabled = false\n",
+        "model = \"gpt-6-luna\"\nmodel_reasoning_effort = \"high\"\nservice_tier = \"default\"\napproval_policy = \"never\"\nsandbox_mode = \"read-only\"\nweb_search = \"disabled\"\nproject_doc_max_bytes = 0\ncli_auth_credentials_store = \"file\"\ninclude_permissions_instructions = false\ninclude_collaboration_mode_instructions = false\ninclude_environment_context = false\ninclude_apps_instructions = false\nthread_unload_delay_secs = 0\n[agents]\nenabled = false\n[skills]\ninclude_instructions = false\n[skills.bundled]\nenabled = false\n[cloud.skills]\nenabled = false\n[orchestrator.mcp]\nenabled = false\n[tools.experimental_request_user_input]\nenabled = false\n[features]\n{}\nskip_host_skill_discovery = true\n[tools.update_plan]\nenabled = false\n",
         disabled.map(|name| format!("{name} = false")).join("\n")
     )
 }
@@ -198,19 +206,21 @@ impl WorkerSpec {
                     .join(".codex")
             });
         copy_auth(&private_home, &source)?;
-        let cache = source.join("models_cache.json");
-        if cache.is_file() {
-            write_private(
-                &private_home.join("models_cache.json"),
-                &fs::read(cache)?,
-                false,
-            )?;
+        let version = format!("{}.{}.{}", parts.0, parts.1, parts.2);
+        // Catalog discovery happens in this private worker, never by copying a host model cache.
+        let valid_catalog = catalog_matches_login(&private_home, &version);
+        if !valid_catalog && private_home.join("models_cache.json").exists() {
+            fs::remove_file(private_home.join("models_cache.json"))?;
         }
-        write_private(
-            &private_home.join("config.toml"),
-            worker_config().as_bytes(),
-            false,
-        )?;
+        let config = if valid_catalog {
+            format!(
+                "model_catalog_json = \"/home/codex/.codex/npc-models.json\"\n{}",
+                worker_config()
+            )
+        } else {
+            worker_config()
+        };
+        write_private(&private_home.join("config.toml"), config.as_bytes(), false)?;
         let mut args: Vec<OsString> = [
             "--unshare-user",
             "--unshare-pid",
@@ -293,7 +303,32 @@ impl WorkerSpec {
             env,
             codex,
             private_home,
+            version,
         })
+    }
+    pub fn has_catalog(&self) -> bool {
+        catalog_matches_login(&self.private_home, &self.version)
+    }
+    pub fn freeze_discovered_catalog(&self) -> Result<()> {
+        let cache = fs::read(self.private_home.join("models_cache.json"))
+            .context("Private discovery did not supply a model descriptor")?;
+        let catalog = sanitized_catalog(&cache, &self.version)?;
+        write_private(&self.private_home.join("npc-models.json"), &catalog, false)?;
+        let metadata = json!({"version":self.version,"authDigest":auth_digest(&self.private_home)?,"catalogDigest":format!("{:x}",Sha256::digest(&catalog))});
+        write_private(
+            &self.private_home.join("npc-models.meta.json"),
+            &serde_json::to_vec(&metadata)?,
+            false,
+        )?;
+        write_private(
+            &self.private_home.join("config.toml"),
+            format!(
+                "model_catalog_json = \"/home/codex/.codex/npc-models.json\"\n{}",
+                worker_config()
+            )
+            .as_bytes(),
+            false,
+        )
     }
     pub fn command(&self) -> Command {
         let mut command = Command::new(&self.helper);
@@ -323,6 +358,74 @@ impl WorkerSpec {
         );
         Ok(String::from_utf8_lossy(&output.stdout).trim().into())
     }
+}
+
+fn auth_digest(home: &Path) -> Result<String> {
+    Ok(format!(
+        "{:x}",
+        Sha256::digest(fs::read(home.join("auth.json"))?)
+    ))
+}
+fn catalog_matches_login(home: &Path, version: &str) -> bool {
+    let valid = || -> Result<bool> {
+        for name in ["npc-models.json", "npc-models.meta.json", "auth.json"] {
+            let metadata = fs::symlink_metadata(home.join(name))?;
+            ensure!(
+                metadata.is_file() && !metadata.file_type().is_symlink(),
+                "Private catalog must use regular files"
+            );
+        }
+        let metadata: Value =
+            serde_json::from_slice(&fs::read(home.join("npc-models.meta.json"))?)?;
+        let bytes = fs::read(home.join("npc-models.json"))?;
+        Ok(metadata["version"] == version
+            && metadata["authDigest"] == auth_digest(home)?
+            && metadata["catalogDigest"] == format!("{:x}", Sha256::digest(bytes)))
+    };
+    valid().unwrap_or(false)
+}
+
+fn sanitized_catalog(cache: &[u8], version: &str) -> Result<Vec<u8>> {
+    let cache: Value = serde_json::from_slice(cache)?;
+    ensure!(
+        cache["client_version"] == version
+            && cache["identity"].as_str().is_some_and(|s| !s.is_empty())
+            && cache["fetched_at"].is_string(),
+        "Model descriptor lacks matching discovery metadata"
+    );
+    let models = cache["models"]
+        .as_array()
+        .context("Missing discovered models")?;
+    let matches = models
+        .iter()
+        .filter(|m| m["slug"] == crate::model::MODEL)
+        .collect::<Vec<_>>();
+    ensure!(
+        matches.len() == 1,
+        "Discovery must contain exactly one Luna descriptor"
+    );
+    let mut model = matches[0].clone();
+    ensure!(
+        model["context_window"].as_u64().is_some_and(|n| n > 0)
+            && model["model_messages"].is_object()
+            && model["supported_reasoning_levels"]
+                .as_array()
+                .is_some_and(|levels| levels
+                    .iter()
+                    .any(|level| level["effort"] == crate::model::EFFORT)),
+        "Luna descriptor is incomplete or does not support high reasoning"
+    );
+    model["tool_mode"] = json!("direct");
+    model["experimental_supported_tools"] = json!([]);
+    model["shell_type"] = json!("disabled");
+    model["apply_patch_tool_type"] = Value::Null;
+    model["supports_search_tool"] = json!(false);
+    model["multi_agent_version"] = Value::Null;
+    model["include_skills_usage_instructions"] = json!(false);
+    model["include_plugin_usage_instructions"] = json!(false);
+    model["include_apps_usage_instructions"] = json!(false);
+    model["model_messages"]["persistent_instructions"] = json!("");
+    serde_json::to_vec(&json!({"models":[model]})).map_err(Into::into)
 }
 
 #[cfg(test)]

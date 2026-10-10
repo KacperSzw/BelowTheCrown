@@ -23,8 +23,10 @@ chmod +x below-the-crown
 ./below-the-crown host
 ```
 
-Pick a scenario, English or Polish, and your LAN interface. The manager displays
-an SSH command for everyone on that LAN.
+Pick a scenario, English or Polish, your LAN interface, and the maximum number
+of agents running at once (default 5), and passive NPC thinking rate (1×/5×/15×,
+default 5×). A day lasts one active real hour at every thinking rate. The manager displays an SSH command for
+everyone on that LAN. The agent limit can also be changed in manager Settings.
 
 ## Play
 
@@ -41,6 +43,6 @@ Choose your name. Write to speak in your room; `/` shows actions.
 `/shout` reaches neighbouring rooms. `/auto on` interprets your speech as actions.
 
 [Hosting and saves](docs/hosting.md) · [Troubleshooting](docs/sandbox.md) ·
-[Development](docs/development.md)
+[Development](docs/development.md) · [NPC minds](docs/npc-minds.md)
 
 MIT · [Third-party notices](NOTICES.md)

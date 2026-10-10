@@ -7,7 +7,103 @@ use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
+use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
+
+fn normalized_words(text: &str) -> Vec<String> {
+    let text = text
+        .nfc()
+        .collect::<String>()
+        .to_lowercase()
+        .nfc()
+        .collect::<String>();
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() >= 3)
+        .map(str::to_owned)
+        .collect()
+}
+fn recall_words(query: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    normalized_words(query)
+        .into_iter()
+        .filter(|word| {
+            !matches!(
+                word.as_str(),
+                "the"
+                    | "and"
+                    | "for"
+                    | "you"
+                    | "your"
+                    | "with"
+                    | "that"
+                    | "this"
+                    | "have"
+                    | "has"
+                    | "was"
+                    | "are"
+                    | "from"
+                    | "into"
+                    | "someone"
+                    | "entered"
+                    | "room"
+                    | "reassess"
+                    | "situation"
+                    | "routine"
+                    | "decide"
+                    | "decision"
+                    | "seconds"
+                    | "observation"
+                    | "character"
+                    | "want"
+                    | "will"
+                    | "but"
+                    | "been"
+                    | "their"
+                    | "they"
+                    | "them"
+                    | "what"
+                    | "when"
+                    | "where"
+                    | "only"
+                    | "other"
+                    | "some"
+                    | "than"
+                    | "then"
+                    | "heard"
+                    | "słyszysz"
+                    | "słowa"
+                    | "osoby"
+                    | "usłyszane"
+                    | "chcę"
+                    | "muszę"
+                    | "moje"
+                    | "moja"
+                    | "mój"
+                    | "się"
+                    | "jest"
+                    | "nie"
+                    | "dla"
+                    | "jak"
+                    | "oraz"
+                    | "przez"
+                    | "który"
+                    | "która"
+                    | "twoje"
+                    | "twoja"
+                    | "twój"
+                    | "ktoś"
+                    | "wszedł"
+                    | "pomieszczenia"
+                    | "oceń"
+                    | "sytuację"
+                    | "decyzja"
+                    | "postać"
+                    | "sekund"
+            ) && seen.insert(word.clone())
+        })
+        .take(12)
+        .collect()
+}
 
 fn sql_id(id: u64) -> Result<i64> {
     i64::try_from(id).context("Journal ID exceeds SQLite's supported range.")
@@ -308,6 +404,24 @@ pub fn assert_world(world: &WorldState) -> Result<()> {
         for intent in &actor.plan {
             intent.check()?;
         }
+        for outcome in actor
+            .last_action_outcome
+            .iter()
+            .chain(&actor.last_plan_failure)
+        {
+            outcome.intent.check()?;
+            ensure!(
+                outcome.time.is_finite() && outcome.time >= 0. && outcome.time <= world.time,
+                "Invalid action outcome time."
+            );
+        }
+        ensure!(
+            actor
+                .last_plan_failure
+                .as_ref()
+                .is_none_or(|outcome| !outcome.ok),
+            "A plan failure cannot report success."
+        );
         ensure!(
             actor
                 .equipment
@@ -478,6 +592,20 @@ impl Store {
         Self::initialize(Connection::open_in_memory()?, PathBuf::from(":memory:"))
     }
     fn initialize(db: Connection, path: PathBuf) -> Result<Self> {
+        db.create_scalar_function(
+            "npc_memory_match",
+            2,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            |context| {
+                let text = normalized_words(&context.get::<String>(0)?);
+                let query = context.get::<String>(1)?;
+                Ok(query
+                    .split('\u{1f}')
+                    .filter(|word| !word.is_empty() && text.iter().any(|actual| actual == word))
+                    .count() as i64)
+            },
+        )?;
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
             CREATE TABLE IF NOT EXISTS checkpoint(singleton INTEGER PRIMARY KEY CHECK(singleton=1),data TEXT NOT NULL) STRICT;
             CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY,time REAL NOT NULL,data TEXT NOT NULL) STRICT;
@@ -636,6 +764,19 @@ impl Store {
         values.reverse();
         Ok(values)
     }
+    pub fn owned_memory(&self, actor: u16, id: u64) -> Result<Option<Memory>> {
+        let text: Option<String> = self
+            .db
+            .query_row(
+                "SELECT data FROM memories WHERE actor_id=? AND id=?",
+                params![actor, sql_id(id)?],
+                |row| row.get(0),
+            )
+            .optional()?;
+        text.map(|s| serde_json::from_str(&s))
+            .transpose()
+            .map_err(Into::into)
+    }
     /// Keep others' words available even when this actor has spoken repeatedly.
     pub fn recent_dialogue(
         &self,
@@ -663,46 +804,84 @@ impl Store {
         Ok(values)
     }
     pub fn recall(&self, actor: u16, query: &str, limit: usize) -> Result<Vec<Memory>> {
-        // Unicode-aware matching happens after the indexed actor filter; no query can cross minds.
-        let words: Vec<_> = query
-            .split(|c: char| !c.is_alphanumeric())
-            .filter(|word| word.chars().count() >= 3)
-            .take(12)
-            .map(str::to_lowercase)
-            .collect();
-        let mut recent = Vec::new();
-        let mut relevant = Vec::new();
-        let mut important = Vec::new();
-        let ranked_insert = |selected: &mut Vec<Memory>, memory: Memory, maximum: usize| {
-            selected.push(memory);
-            selected.sort_by_key(|m| (std::cmp::Reverse(m.importance), std::cmp::Reverse(m.id)));
-            selected.truncate(maximum);
-        };
-        let mut stmt = self
-            .db
-            .prepare("SELECT data FROM memories WHERE actor_id=? ORDER BY id DESC")?;
-        for row in stmt.query_map([actor], |r| r.get::<_, String>(0))? {
-            let memory: Memory = serde_json::from_str(&row?)?;
-            if recent.len() < 8 {
-                recent.push(memory.clone());
-            }
-            if words
-                .iter()
-                .any(|word| memory.text.to_lowercase().contains(word))
-            {
-                ranked_insert(&mut relevant, memory.clone(), 12);
-            }
-            ranked_insert(&mut important, memory, 10);
+        self.recall_excluding(actor, query, limit, &[])
+    }
+    pub fn recall_excluding(
+        &self,
+        actor: u16,
+        query: &str,
+        limit: usize,
+        excluded: &[u64],
+    ) -> Result<Vec<Memory>> {
+        let recent = limit / 4;
+        let relevant = limit / 12 * 5 + (limit % 12) * 5 / 12;
+        self.recall_with_budget(
+            actor,
+            query,
+            [recent, relevant, limit - recent - relevant],
+            excluded,
+        )
+    }
+    /// Explicit allocation lets tests and callers tune diversity without changing defaults.
+    pub fn recall_with_budget(
+        &self,
+        actor: u16,
+        query: &str,
+        allocation: [usize; 3],
+        excluded: &[u64],
+    ) -> Result<Vec<Memory>> {
+        let limit = allocation
+            .iter()
+            .try_fold(0usize, |sum, n| sum.checked_add(*n))
+            .context("Recall budget overflow")?;
+        if limit == 0 {
+            return Ok(vec![]);
         }
+        let query = recall_words(query).join("\u{1f}");
+        let excluded = serde_json::to_string(excluded)?;
+        let candidates = limit.saturating_mul(3).min(i64::MAX as usize) as i64;
+        let load = |ranking: &str| -> Result<Vec<Memory>> {
+            let sql = format!(
+                "SELECT data FROM memories WHERE actor_id=?1 AND id NOT IN (SELECT value FROM json_each(?2)) {ranking} LIMIT ?4"
+            );
+            let mut statement = self.db.prepare(&sql)?;
+            statement
+                .query_map(params![actor, excluded, query, candidates], |row| {
+                    row.get::<_, String>(0)
+                })?
+                .map(|row| Ok(serde_json::from_str(&row?)?))
+                .collect()
+        };
+        // Relevant candidates still scan this actor's text in SQLite; only bounded pools deserialize.
+        let recent = load("AND length(?3)>=0 ORDER BY id DESC")?;
+        let relevant = load(
+            "AND npc_memory_match(json_extract(data,'$.text'),?3)>0 ORDER BY npc_memory_match(json_extract(data,'$.text'),?3) DESC, importance DESC, id DESC",
+        )?;
+        let important = load("AND length(?3)>=0 ORDER BY importance DESC, id DESC")?;
         let mut seen = HashSet::new();
-        let mut selected: Vec<_> = recent
-            .into_iter()
-            .chain(relevant)
-            .chain(important)
-            .filter(|m| seen.insert(m.id))
-            .take(limit)
-            .collect();
-        selected.sort_by_key(|m| m.id);
+        let mut selected = Vec::new();
+        for (pool, quota) in [
+            (&recent, allocation[0]),
+            (&relevant, allocation[1]),
+            (&important, allocation[2]),
+        ] {
+            selected.extend(
+                pool.iter()
+                    .filter(|m| seen.insert(m.id))
+                    .take(quota)
+                    .cloned(),
+            );
+        }
+        selected.extend(
+            relevant
+                .iter()
+                .chain(&important)
+                .chain(&recent)
+                .filter(|m| seen.insert(m.id))
+                .take(limit.saturating_sub(selected.len()))
+                .cloned(),
+        );
+        selected.sort_by(|a, b| a.time.total_cmp(&b.time).then(a.id.cmp(&b.id)));
         Ok(selected)
     }
     pub fn owns_evidence(&self, actor: u16, ids: &[u64]) -> Result<bool> {

@@ -18,7 +18,7 @@ ipnet = { version = "2", features = ["serde"] }
 libc = "0.2"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 regex = "1"
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite = { version = "0.40.2", features = ["bundled", "functions"] }
 russh = { version = "0.64.1", default-features = false, features = ["ring", "rsa"] }
 schemars = "1.2"
 serde = { version = "1", features = ["derive"] }

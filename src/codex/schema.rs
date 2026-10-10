@@ -84,12 +84,26 @@ pub fn intents(speech: bool) -> Value {
                     json!({"anyOf":[id(),{"type":"null"}]})
                 } else if *name == "plot" {
                     json!({"anyOf":[object(json!({"victimId":id()})),{"type":"null"}]})
+                } else if kind == "rest" && *name == "seconds" {
+                    json!({"type":"integer","minimum":5,"maximum":8640})
                 } else {
                     field(name)
                 };
                 properties.insert((*name).into(), value);
             }
-            object(Value::Object(properties))
+            let mut schema = object(Value::Object(properties));
+            let description = match kind {
+                "speak" => Some("Your complete utterance: this must be the only speak entry anywhere in plan, including after inspect or another action. Combine everything you want to say here. Speech cannot transfer an item or complete an action."),
+                "inspect" => Some("Observe this target once. Inspection does not secure, take, move or alter it. Do not add another speech after inspection; combine your words in the decision's single speak entry."),
+                "give" => Some("Actually transfer this owned item to the recipient. Use this action, rather than speech or accept_offer, when giving something."),
+                "accept_offer" => Some("Accept an existing offer addressed to you, using an offerId from offers. If offers is empty, this action is unavailable."),
+                "wait" | "guard" | "rest" | "hide" => Some("Start one activity for this duration. Do not repeat identical steps. Omit this action when you mean to continue currentActivity."),
+                _ => None,
+            };
+            if let Some(description) = description {
+                schema["description"] = json!(description);
+            }
+            schema
         })
         .collect::<Vec<_>>();
     json!({"anyOf":alternatives})
@@ -99,9 +113,10 @@ pub fn decision_schema() -> Value {
         json!({"type":"array","items":{"type":"integer","minimum":1},"minItems":1,"maxItems":8});
     let delta = json!({"type":"integer","minimum":-15,"maximum":15});
     object(
-        json!({"summary":text(300),"goals":array(text(240),5),"plan":{"type":"array","items":intents(true),"minItems":1,"maxItems":6},
+        json!({"summary":text(300),"goals":array(text(240),5),"plan":{"type":"array","items":intents(true),"maxItems":6,"description":"Shortest useful plan, not a sequence of dialogue turns. At most one speak in the entire array; never append another speak after inspection or an activity. Empty means keep your current activity or quietly observe outside combat. Durations are calendar seconds; rest permits up to 8640. Later steps must satisfy their preconditions when executed."},
         "memories":array(object(json!({"text":text(600),"kind":choice(&["belief","reflection"]),"evidenceIds":evidence,"importance":{"type":"integer","minimum":1,"maximum":10}})),4),
-        "relationships":array(object(json!({"targetId":id(),"trust":delta,"affection":delta,"fear":delta,"respect":delta,"evidenceIds":evidence})),4),"acceptPlots":array(id(),3)}),
+        "relationships":array(object(json!({"targetId":id(),"trust":delta,"affection":delta,"fear":delta,"respect":delta,"evidenceIds":evidence})),4),"acceptPlots":array(id(),3),
+        "acceptHeardProposals":array(object(json!({"memoryId":{"type":"integer","minimum":1},"victimId":id()})),3)}),
     )
 }
 pub fn interpretation_schema() -> Value {

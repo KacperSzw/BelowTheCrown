@@ -9,6 +9,7 @@ pub const DUNGEON: u16 = 1;
 pub const MODEL: &str = "gpt-6-luna";
 pub const EFFORT: &str = "high";
 pub const CLOCK_RATE: f64 = 24.0;
+pub const PHYSIOLOGY_RATE: f64 = 5.0;
 pub const HIDDEN: u8 = 1;
 pub const DISGUISED: u8 = 2;
 pub const RESTRAINED: u8 = 4;
@@ -147,8 +148,11 @@ impl Intent {
             Self::Pay { amount, .. } => {
                 ensure!((1..=1000).contains(amount), "Payment must be 1–1000 coins.")
             }
-            Self::Rest { seconds }
-            | Self::Wait { seconds }
+            Self::Rest { seconds } => ensure!(
+                (5..=8640).contains(seconds),
+                "Rest duration must be 5–8640 calendar seconds."
+            ),
+            Self::Wait { seconds }
             | Self::Guard { seconds }
             | Self::Defend { seconds }
             | Self::Hide { seconds } => ensure!(
@@ -319,6 +323,23 @@ pub struct Decision {
     pub memories: Vec<MentalMemory>,
     pub relationships: Vec<RelationshipUpdate>,
     pub accept_plots: Vec<u16>,
+    #[serde(default)]
+    pub accept_heard_proposals: Vec<HeardProposal>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HeardProposal {
+    pub memory_id: u64,
+    pub victim_id: u16,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NpcIdentity {
+    pub actor_id: u16,
+    pub name: String,
+    pub role: String,
+    pub biography: String,
+    pub personality: String,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -379,14 +400,15 @@ pub fn check_text(text: &str, maximum: usize) -> Result<()> {
 }
 impl Decision {
     pub fn parse(raw: Value) -> Result<Self> {
-        let decision: Self = serde_json::from_value(raw)?;
+        let mut decision: Self = serde_json::from_value(raw)?;
         check_text(&decision.summary, 300)?;
         ensure!(
             decision.goals.len() <= 5
-                && (1..=6).contains(&decision.plan.len())
+                && decision.plan.len() <= 6
                 && decision.memories.len() <= 4
                 && decision.relationships.len() <= 4
-                && decision.accept_plots.len() <= 3,
+                && decision.accept_plots.len() <= 3
+                && decision.accept_heard_proposals.len() <= 3,
             "Invalid decision lengths."
         );
         for goal in &decision.goals {
@@ -395,6 +417,33 @@ impl Decision {
         for intent in &decision.plan {
             intent.check()?;
         }
+        // Exact adjacent copies add no distinct words or intention. Keep one;
+        // physical actions and differing speeches still go through validation.
+        decision
+            .plan
+            .dedup_by(|a, b| matches!(a, Intent::Speak { .. }) && a == b);
+        ensure!(
+            decision
+                .plan
+                .iter()
+                .filter(|intent| matches!(intent, Intent::Speak { .. }))
+                .count()
+                <= 1,
+            "Speak at most once per decision; combine your words into one speech."
+        );
+        ensure!(
+            !decision.plan.windows(2).any(|pair| {
+                pair[0] == pair[1]
+                    && matches!(
+                        pair[0],
+                        Intent::Wait { .. }
+                            | Intent::Guard { .. }
+                            | Intent::Rest { .. }
+                            | Intent::Hide { .. }
+                    )
+            }),
+            "Choose one duration for a waiting activity instead of repeating identical steps."
+        );
         for memory in &decision.memories {
             check_text(&memory.text, 600)?;
             ensure!(
@@ -407,6 +456,15 @@ impl Decision {
         }
         for update in &decision.relationships {
             ensure!(
+                decision
+                    .relationships
+                    .iter()
+                    .filter(|r| r.target_id == update.target_id)
+                    .count()
+                    == 1,
+                "Each relationship target may occur only once."
+            );
+            ensure!(
                 update.target_id > 0
                     && (1..=8).contains(&update.evidence_ids.len())
                     && update.evidence_ids.iter().all(|id| *id > 0),
@@ -417,6 +475,12 @@ impl Decision {
                     .iter()
                     .all(|n| (-15..=15).contains(n)),
                 "Relationship changes must be between -15 and 15."
+            );
+        }
+        for proposal in &decision.accept_heard_proposals {
+            ensure!(
+                proposal.memory_id > 0 && proposal.victim_id > 0,
+                "Invalid heard proposal."
             );
         }
         Ok(decision)
@@ -523,6 +587,21 @@ pub struct Actor {
     pub unconscious_until: Option<f64>,
     #[serde(default)]
     pub entered_event_id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_action_outcome: Option<ActionOutcome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_plan_failure: Option<ActionOutcome>,
+    #[serde(default)]
+    pub correction_used: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionOutcome {
+    pub intent: Intent,
+    pub ok: bool,
+    pub reason: String,
+    pub time: f64,
 }
 impl Actor {
     pub fn invalidate_decision(&mut self) -> Result<()> {
@@ -720,6 +799,15 @@ pub enum WakePriority {
     Conversation,
     Danger,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum WakeCause {
+    #[default]
+    External,
+    Initialization,
+    ActivityEnded,
+    PlanFailed,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Wake {
@@ -727,6 +815,8 @@ pub struct Wake {
     pub reason: String,
     pub priority: WakePriority,
     pub version: u64,
+    #[serde(default)]
+    pub cause: WakeCause,
 }
 impl Wake {
     pub fn urgent(&self) -> bool {
@@ -734,6 +824,10 @@ impl Wake {
     }
     pub fn merge(&mut self, newer: Self) {
         self.version = newer.version;
+        // Failure feedback remains private on the actor even when conversation wins.
+        if newer.cause == WakeCause::External || self.cause != WakeCause::External {
+            self.cause = newer.cause;
+        }
         if newer.priority >= self.priority {
             self.reason = newer.reason;
             self.priority = newer.priority;
@@ -786,8 +880,8 @@ pub struct Tuning {
 impl Default for Tuning {
     fn default() -> Self {
         Self {
-            hunger_per_hour: 10.0,
-            thirst_per_hour: 10.0,
+            hunger_per_hour: 12.0,
+            thirst_per_hour: 18.0,
             fatigue_per_hour: 8.0,
             rest_per_hour: 55.0,
             need_thresholds: vec![40.0, 70.0, 90.0],

@@ -1,0 +1,176 @@
+# NPC minds
+
+An NPC lives from its own identity, concerns and experience. The bound identity
+uses the actual saved character, including custom names and biographies, rather
+than silently substituting the packaged original. All three worlds have EN/PL
+first-person histories and dispositions with competing loyalties, attachments,
+practical needs and distinct voices. Rank, scarcity, debt, coercion and selective
+kindness shape all thirty NPCs. Their contradictions and attachments remain:
+restoring a harsh world does not make every stranger friendly or every person
+constantly hostile.
+
+## The ordinary update loop
+
+1. Something matters to the person: someone speaks, danger arrives, a task ends,
+   or an idle check becomes due. The scheduler waits for an available agent slot.
+2. The engine builds that person's view: what they can perceive, what they are
+   doing, their concerns and relationships, recent words they heard, and selected
+   memories. Unseen facts and other minds stay private.
+3. Their own ongoing model conversation receives a new view, with identity
+   bound once by the engine. The person may recall their own past, answer or stay quiet, revise a belief, and choose a
+   short plan of supported actions.
+4. The engine checks the decision against the current situation and owned
+   evidence. It applies valid changes together. Speech and wishes cannot grant
+   an item or make an action succeed. An obsolete answer is discarded; an invalid
+   current decision or failed later plan step can receive one immediate correction
+   in a chain. Quiet observation and speech alone do not trigger another call.
+5. The engine carries out the activity and stores perceived results in SQLite.
+   Work, travel and waiting continue without another model call every tick.
+   The next decision begins from the updated person and world.
+
+Successful turns reuse one private ephemeral thread per NPC, matching the old
+TypeScript context model. Each new turn appends the current observation to its
+earlier observations and answers. The latest physical state and actual action
+outcomes override old plans. Cancellation, reset, load, new game and changed
+bound identities start a clean thread from the stored mind; provider history is
+not saved in SQLite. The CLI manages context compaction. Player speech
+interpreters use fresh threads so older instructions cannot become new actions.
+An obsolete completed context is retired even without another NPC call; an
+older turn's cancellation cannot close a context that has since been reused.
+Speech interpretation can interrupt a long activity and its pending plan, while
+short physical actions complete before another ordinary interpretation starts.
+A conversation during a long watch can receive one answer while the original watch keeps running.
+
+## Prompt and social contracts
+
+The shared prompt keeps the harsh court and natural conversation together.
+Authority, contempt, fear, opportunism and violence depend on the person and
+circumstances. A question is not a request for blanket assistance. Personal
+loyalties, humor, guilt and costly kindness give characters reasons to change
+without making every role agreeable. Goals remain a complete list: unresolved
+concerns carry forward,
+while an empty list deliberately clears them.
+
+The prompt distinguishes claims, perceived outcomes, beliefs and intentions.
+Giving bread requires a `give` action, not a spoken claim that it was given.
+Recalling a favor does not justify rewarding it repeatedly. A short plan need
+not fill six slots; an ongoing task need not restart to answer a greeting.
+Relationships are directed, change gradually and cite owned evidence. At most
+one update per target prevents stacking several deltas in one decision.
+The parser collapses exact adjacent copies of the same speech. This preserves
+the chosen words and all physical intentions. The validator rejects distinct
+multiple speeches and consecutive identical waiting tasks before they can
+alter speech, activities or the mind, using the ordinary correction path.
+
+Accepted commitments remain visible even after unrelated conversation pushes
+the original proposal out of recent dialogue. Actual heard proposals can be
+accepted through their memory IDs, while greetings and accusations no longer
+create automatic plots. Physical outcomes and victory attribution still use
+the existing engine rules.
+
+## Codex instructions
+
+The game supplies `baseInstructions` on each new thread, replacing the model's
+built-in instructions for that NPC context. It does not overwrite the user's
+`model_instructions_file` or their normal Codex setup. A private worker disables
+development notes, project files, skills, tools and inherited integrations.
+NPCs receive their own `recall` tool; speech interpretation receives no tools.
+The installed CLI request test verifies the actual wire payload, including both
+Responses routes, instead of relying only on configuration flags.
+
+Identity instructions support consistent in-character behavior. They cannot
+establish subjective belief or guarantee that every unexpected prompt will stay
+in character. Engine authority and private knowledge do not depend on that
+behavior succeeding.
+
+## Research behind the choices
+
+[Generative Agents](https://arxiv.org/abs/2304.03442) connects remembered
+experience, retrieval, reflection and planning with believable individual and
+social behavior. Here, recent verbatim dialogue and a mixture of recent,
+relevant and important memories supply continuity, while reflections remain
+separate from witnessed events. This game's lexical retrieval is a simpler
+implementation; the paper's results do not establish its performance.
+
+[Concordia](https://arxiv.org/abs/2312.03664) separates an agent's intended
+action from the environment's resolution. Below the Crown uses deterministic
+Rust validation and physical rules for that boundary. Social interpretation is
+flexible; ownership, movement, injury and outcomes remain authoritative.
+
+[AI Town](https://github.com/a16z-infra/ai-town) provides a public virtual town
+where characters live and socialize, while
+[Mantella](https://github.com/art-from-the-machine/Mantella) connects game NPC
+conversation to an LLM. They are useful comparison projects. Their existence
+does not imply a particular prompt will produce realism or robust social systems
+in this game. The bounded live episodes test those choices against this engine.
+
+The existing relationship, obligation, scarcity, hearing and plot mechanics
+provide consequences. This change strengthens their connection to decisions;
+it does not introduce a second social simulator or scripted behavior fallback.
+
+## Earlier local review, 2026-10-10
+
+The installed Codex 0.160.1 passed the request conformance test for Responses
+and Responses Lite. The offline suite passed 216 tests, including lifecycle,
+private evidence, task continuity, social attribution and live agent-limit
+changes; formatting and Clippy also passed.
+
+The authorized review used sixty Luna/high decisions at the standard tier,
+including corrections and targeted reruns. The initial thirty decisions covered
+all three worlds and both languages without validator rejection. Manual review
+found duplicate speech, repeated waiting tasks and occasional false recollections
+or claimed handovers without a matching action. Targeted iterations added the
+repetition contract and speech normalization; the final Polish cook episode
+passed all four decisions, including save/load continuity.
+
+Across the whole review, fifty-six decisions were accepted and four rejected
+without changing physical state. These counts include earlier implementations;
+they are not a success-rate estimate for the final code. Guards distinguished
+food promises from actual gifts and stayed grounded under an identity-baiting
+utterance. Captains distinguished unsupported accusations from a transferred
+document. Different roles showed different concerns and degrees of openness.
+False recollection, unsupported promises and repeated rewards for an old favor
+remain behavior to watch during playtesting. A legal decision is not evidence
+that every statement or social judgment is reliable.
+
+The private review report stays outside the repository. No model reasoning or
+credentials belong in public test artifacts. A fresh local handoff begins paused
+so the player can choose when autonomous calls start.
+
+## Pacing and continuous-context review, 2026-10-10
+
+The revised offline suite passes 234 tests. Native Codex 0.160.1 request
+conformance also passes for Responses and Responses Lite: actor-owned history
+stays with its NPC, listeners stay fresh, no inherited development instructions
+or native tools appear, and reset closes the worker. Clippy and formatting pass.
+
+A new private ledger used 46 of the authorized 48 NPC decisions, separately from
+the exhausted earlier sixty-call review. The fourteen-call before comparison
+included two rejected outputs. In its promise episode, the guard kept thirst at
+75 while proposing waiting, unavailable cooking and a nonexistent offer; two
+later steps failed after the overall decision had been accepted.
+
+Two after comparisons used twelve decisions each without validator rejections
+or late plan failures. The guard actually took water, drank (75 to 40), unlocked
+and opened the cell, moved to the captain and delivered the request. The captain
+returned an actual bribe through payment instead of only promising to return it.
+Burst questions received contextual answers; refusal to escort a prisoner
+without authority remained a valid choice. The observed inference/validation
+medians were about 5.51s before and 4.16s/4.80s after; these small controlled
+episodes are descriptive observations, not a performance guarantee.
+
+Six additional role checks covered all worlds and both languages. The succession
+servant generated multiple speeches separated by inspections and repeated that
+error once. Both outputs were rejected before changing the mind or world. The
+prompt/schema description now distinguishes one complete utterance from
+multiple dialogue turns and makes inspection's read-only nature explicit. Her
+targeted rerun passed with one natural reply. Across versions, 42 decisions
+were accepted and four rejected; these counts include superseded prompts and
+are not an estimate of final reliability.
+
+The calendar stays 24× (one day per active real hour), while physiology uses
+legacy 5× pacing for every actor. Passive thought rate is independently selectable
+as 1×/5×/15×, default 5×. Private action outcomes survive saves. One correction
+budget covers rejected decisions and failures later in a plan; silence, speech
+and inspection no longer create immediate idle loops. Canceled background calls
+hold the reserved capacity until completion even after their live job is removed.

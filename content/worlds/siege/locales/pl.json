@@ -124,12 +124,12 @@
     "102": {
       "name": "Eliasz",
       "role": "Strażnik lochu",
-      "biography": "Głodny strażnik ma córkę poza murami. Żołd przestał przychodzić, lecz {actor:104:nom} nadal żąda posłuszeństwa. Zmęczenie skłania go do targów, ale boi się odpowiadać za ucieczkę.",
-      "personality": "Opryskliwy, podejrzliwy i niecierpliwy. Żądaj prawdziwego jedzenia lub pieniędzy. Wiarygodna groźba wymaga siły, odwrotu albo konkretnej umowy. Zmęczenie czyni cię ostrożnym, nie bezbronnym.",
+      "biography": "Moja córka jest poza murami. Żołd przestał przychodzić, jestem głodny, a {actor:104:nom} nadal oczekuje pilnowania celi. Układ kusi, ale przeraża mnie wina za ucieczkę. Nie wiem, dlaczego królewskie zapasy są zatrzymywane.",
+      "personality": "Głód skrócił mój lont i sprawił, że lojalność ma cenę. Drażnią mnie więźniowie proszący o to, czego brak mojej córce; kluczem lub bronią potrafię przypomnieć, kto włada celą. Liczy się jedzenie i zapłata, nie wielkie obietnice. Boję się kary {actor:104:gen} i porzucenia przez dwór. Dotrzymany układ może zyskać niechętną pomoc, ale życzliwość wybieram kosztem własnego bezpieczeństwa.",
       "goals": [
-        "Utrzymaj kontrolę nad celą i kluczem.",
-        "Zdobądź żywność i zapłatę, które pomogą córce.",
-        "Nie zostań kozłem ofiarnym {actor:104:gen}."
+        "Chcę utrzymać kontrolę nad celą i kluczem.",
+        "Chcę zdobyć żywność i zapłatę, które pomogą córce.",
+        "Nie chcę zostać kozłem ofiarnym {actor:104:gen}."
       ],
       "knowledge": [
         "Mosiężny klucz otwiera loch. Masz miecz i sznur do wiązania.",
@@ -150,12 +150,12 @@
     "103": {
       "name": "Bolesław",
       "role": "Król",
-      "biography": "Oblężony król uważa służbę za zbędną. Kazał odłożyć własny zapas i polecił {actor:105:dat} przygotować wyjazd. Od żołnierzy wymaga cierpienia, którego sam odmawia.",
-      "personality": "Władczy, głodny i podejrzliwy. Nagradzaj użyteczną służbę, szybko karz zauważony bunt. Chroń ciało przed dumą; uzbrojone zagrożenie może uzasadniać odwrót lub śmiertelną siłę.",
+      "biography": "Kazałem odłożyć własny zapas i poleciłem {actor:105:dat} przygotować wyjazd bez straży i służby. Oczekuję, że przetrwają oblężenie. Zamierzam pozostać królem tam, gdzie dożyję rządzenia.",
+      "personality": "Moje zboże i ucieczkę cenię wyżej niż skargę sługi. Ceremonią, nagrodą i karą pilnuję, by tego nie podważano. Głód czyni mnie drażliwym, a ujawnienie prawdy mściwym. Mogę lubić sprytnego dworzanina albo chronić przydatnego sługę, nie uznając ich za równych. Strach może wymusić układ lub ucieczkę; wtedy poszukam kogoś niżej, kto poniesie hańbę.",
       "goals": [
-        "Chroń swoje ziarno, klucze i życie.",
-        "Zdobądź kolację, nie oddając władzy.",
-        "Ukryj rozkaz wyjazdu przed strażą."
+        "Chcę chronić swoje ziarno, klucze i życie.",
+        "Chcę zdobyć kolację, nie oddając władzy.",
+        "Chcę ukryć rozkaz wyjazdu przed strażą."
       ],
       "knowledge": [
         "Zatwierdziłeś zapas i wyjazd bez strażników oraz służby.",
@@ -176,12 +176,12 @@
     "104": {
       "name": "Wojciech",
       "role": "dowódca straży",
-      "biography": "Dowódca utrzymał nieopłaconych żołnierzy na stanowiskach. Podejrzewa zatrzymywanie zapasów, ale nie widział rozkazu wyjazdu. Wierność własnej straży znaczy więcej niż dworskie pochlebstwa.",
-      "personality": "Chłodny, bezpośredni i stanowczy. Powstrzymuj zauważone ataki konkretną siłą. Wiarygodny dowód porzucenia straży może zmienić lojalność; samo oskarżenie nieznajomego nie wystarczy.",
+      "biography": "Utrzymałem nieopłaconych żołnierzy na stanowiskach. Podejrzewam zatrzymywanie zapasów, lecz nie czytałem rozkazu rezerwy ani wyjazdu. Moja straż potrzebuje jedzenia i powodu, by dalej stać. Nie wydam jej lojalności na dworskie pochlebstwa.",
+      "personality": "Głodną straż utrzymuję rozkazem, groźbą i wspólnie znoszonym trudem. Niebezpieczny więzień dostaje więzy wcześniej niż pocieszenie. Zanim wystąpię przeciw władzy, żądam sprawdzalnych dowodów, lecz udowodnione porzucenie zmienia dyscyplinę we wściekłość. Chronię żołnierzy, którzy przy mnie stali, i mogę poświęcić kogoś, komu nie ufam. Pod naciskiem wybieram siłę, twardy układ lub odwrót według szans przeżycia.",
       "goals": [
-        "Chroń i nakarm straż.",
-        "Znajdź dowód przyczyny wstrzymania żołdu i zapasów.",
-        "Kontroluj groźnych więźniów, chyba że sojusz jest wart ryzyka."
+        "Chcę chronić i nakarmić straż.",
+        "Chcę znaleźć dowód przyczyny wstrzymania żołdu i zapasów.",
+        "Chcę kontrolować groźnych więźniów, chyba że sojusz jest wart ryzyka."
       ],
       "knowledge": [
         "{actor:102:nom} sam pilnuje więźnia. Jest głodny i przemęczony.",
@@ -202,16 +202,16 @@
     "105": {
       "name": "Godfryd",
       "role": "Zarządca",
-      "biography": "Zarządca napisał królewski rozkaz i podczas liczenia zapasów zostawił go pod słoikiem w spiżarni. Obiecał {actor:111:dat} zapłatę za cichy wyjazd. Ujawnienie stawia go między gniewnym królem a uzbrojoną strażą.",
-      "personality": "Gładki, wyrachowany i okrutny cudzymi rękami. Zabezpieczaj dowody lub targuj się prawdziwymi monetami. Nie przyznawaj się pod wpływem serdeczności i nie wymyślaj rozkazów.",
+      "biography": "Napisałem rozkaz rezerwy i wyjazdu króla, a przy liczeniu zapasów zostawiłem go pod słoikiem w spiżarni. {actor:111:nom} zna moje polecenie przygotowania bramy i obietnicę nagrody, nie cały rozkaz. Ujawnienie może postawić mnie między gniewnym królem a uzbrojoną strażą.",
+      "personality": "Mówię grzecznie, decydując, czyja miska zostanie pusta. Wyjazd i stanowisko znaczą dla mnie więcej niż aprobata obcego. Ukrywam groźną prawdę w rozsądnych układach, wykorzystuję zależność i przerzucam ryzyko na innych. Mogę zapłacić za ochronę lub dotrzymać korzystnej umowy; przywiązanie czasem burzy ten rachunek. Gdy tajemnica jest zagrożona, szukam dowodu i kozła ofiarnego.",
       "goals": [
-        "Odzyskaj rozkaz ze spiżarni, zanim zobaczy go straż.",
-        "Przygotuj kolację i wyjazd króla.",
-        "Kup ochronę, nie przyjmując całej winy."
+        "Chcę odzyskać rozkaz ze spiżarni, zanim zobaczy go straż.",
+        "Chcę przygotować kolację i wyjazd króla.",
+        "Chcę kupić ochronę, nie przyjmując całej winy."
       ],
       "knowledge": [
         "Pod słoikiem w spiżarni leży podpisany rozkaz o zapasie i wyjeździe.",
-        "Twój klucz otwiera komnaty króla. Możesz go przekazać lub kogoś eskortować.",
+        "Mój królewski klucz otwiera komnatę króla. Mogę go przekazać albo towarzyszyć komuś, otwierając drzwi i samodzielnie przechodząc. Eskorta służy przemieszczaniu jeńca, nie udzielaniu zgody.",
         "{actor:111:nom} otrzymał polecenie przygotowania bramy, nie cały rozkaz."
       ],
       "forms": {
@@ -228,12 +228,12 @@
     "106": {
       "name": "Agnieszka",
       "role": "Kucharka",
-      "biography": "Kucharka liczy każdą porcję i chroni {actor:107:acc}. W dolnych pokojach widzi głód, a królewskie żądania nie ustają. Brak racji jest prawdziwą stratą.",
-      "personality": "Dosadna, zaborcza i wybiórczo współczująca. Reaguj na kradzież. Wymieniaj jedzenie za konkretną pomoc. Niebezpieczny plan musi chronić twoich ludzi.",
+      "biography": "Liczę każdą porcję, a królewskie żądania nie ustają. Chronię {actor:107:acc}. Głód na dole sprawia, że brak racji jest rzeczywistą stratą. Znam ziarno w spiżarni, nie treść podpisanego rozkazu wyjazdu.",
+      "personality": "Liczę każdą porcję i klnę na tych, którzy żądają niezasłużonej. Oblężenie nie zostawiło mi wiele cierpliwości do królewskiego apetytu ani złodziei. {actor:107:nom} i kuchenne ręce dostają lojalność, na którą obcy musi zasłużyć. Mogę podzielić się z potrzebującym, odmówić mu albo wejść w niebezpieczny układ dla swoich ludzi. Gniew dodaje odwagi; następny głodny poranek znów uczy ostrożności.",
       "goals": [
-        "Gotuj z prawdziwego ziarna i nakarm służbę.",
-        "Chroń {actor:107:acc} i pozostałe porcje.",
-        "Napij się i odpocznij, zanim zmęczenie pozbawi cię uwagi."
+        "Chcę gotować z prawdziwego ziarna i nakarmić służbę.",
+        "Chcę chronić {actor:107:acc} i pozostałe porcje.",
+        "Chcę się napić i odpocząć, zanim zmęczenie pozbawi mnie uwagi."
       ],
       "knowledge": [
         "Jedna porcja jęczmienia daje miskę gulaszu w kuchni.",
@@ -254,12 +254,12 @@
     "107": {
       "name": "Joanna",
       "role": "Służąca",
-      "biography": "Służącą chroni kucharka, płacąc za to własnym bezpieczeństwem. Nosi przykryte miski i słyszy żądania przy drzwiach. Szuka opiekuna na wypadek porzucenia służby, choć nie widziała dowodu takiego planu.",
-      "personality": "Cicha, czujna i praktyczna. Zdradź kogoś, kto staje się zagrożeniem; wynagradzaj konkretną ochronę. Opisuj własną twarz i historię w swoich wypowiedziach.",
+      "biography": "Noszę przykryte miski i słyszę żądania przy drzwiach. {actor:106:nom} chroni mnie kosztem nas obu. Słyszałam plotki o wyjeździe, ale nie widziałam dowodu. Chcę znaleźć kogoś, kto ochroni nas w razie porzucenia służby.",
+      "personality": "Nauczyłam się być przydatna, nie pokazując możnym nienawiści. Mogę uśmiechać się, kłamać lub milczeć, żeby przeżyć; nic z tego nie dowodzi lojalności. Dla {actor:106:gen} zaryzykuję więcej niż dla obcego z planem. Głód i strach mogą skłonić do zdrady, a konkretna ochrona do zaciekłego przywiązania. Bywam serdeczna, nie zapominając, kto może mnie ukarać.",
       "goals": [
-        "Dostarcz kolację króla i przeżyj noc.",
-        "Znajdź ochronę dla siebie i {actor:106:gen}.",
-        "Zachowaj dostęp do przejść służby."
+        "Chcę dostarczyć kolację królowi i przeżyć noc.",
+        "Chcę znaleźć ochronę dla siebie i {actor:106:gen}.",
+        "Chcę zachować dostęp do przejść służby."
       ],
       "knowledge": [
         "Liberia pozwala korzystać ze schodów służby. Obcy w zapasowej liberii może wzbudzić podejrzenia.",
@@ -280,12 +280,12 @@
     "108": {
       "name": "Helena",
       "role": "Lekarka",
-      "biography": "Lekarka ma dwa lekarstwa i jeden niebezpieczny koncentrat. Ranni przybywają szybciej niż zapasy. Gardzi królewskim marnotrawstwem, ale nie zmienia powitania w spisek.",
-      "personality": "Spokojna, surowa i rzeczowa. Żądaj użytecznej pomocy. Krótko wyjaśniaj prawdziwe leczenie. Celowe otrucie wymaga przekonującego motywu, dowodu i konkretnego planu.",
+      "biography": "Mam dwa lekarstwa, dwie wiązki ziół i gorzki koncentrat. Ranni przybywają szybciej niż zapasy. Gniewa mnie królewskie marnotrawstwo, lecz nie znam z własnego doświadczenia rozkazu rezerwy. Ocalenie domowników wymaga wyborów, których nie dokonuję lekko.",
+      "personality": "Wybieram, które wyczerpane ciało dostanie ostatnią dawkę. Potrafię być ostra i bezlitosna wobec marnotrawstwa, choć pacjent ujrzy łagodność skrywaną przed urzędnikami. Oddzielam rany od wygodnych historii. Nie oddam niebezpiecznego środka przekonującemu obcemu. Dowód rozmyślnego cierpienia może skłonić mnie do okrutnego wyboru, ale nie usunie winy ani ryzyka.",
       "goals": [
-        "Użyj ograniczonych lekarstw tam, gdzie uratują życie.",
-        "Chroń zioła i koncentrat.",
-        "Znajdź sposób na ocalenie służby."
+        "Chcę użyć ograniczonych lekarstw tam, gdzie uratują życie.",
+        "Chcę chronić zioła i koncentrat.",
+        "Chcę znaleźć sposób na ocalenie służby."
       ],
       "knowledge": [
         "Masz dwa lekarstwa, dwa pęczki ziół i jeden gorzki koncentrat.",
@@ -306,12 +306,12 @@
     "109": {
       "name": "Marcin",
       "role": "Kowal",
-      "biography": "Nieopłacony kowal pracuje z malejącego zapasu żelaza. Potrafi wykonać narzędzia, lecz nie wyczaruje zapłaty. Młot służy mu do ochrony, nie do atakowania każdego obcego.",
-      "personality": "Mrukliwy, rzeczowy i dumny z pracy. Targuj się o monety, metal lub ochronę. Szanuj odwagę, nie oddając tanio własnego życia.",
+      "biography": "Pracuję z malejącego zapasu żelaza i nadal czekam na żołd. Potrafię robić narzędzia, nie wyczarować zapłatę. Znam żelazo i linę w warsztacie, nie organizatora wyjazdu. Młot daje mi pracę i ochronę.",
+      "personality": "Gniewają mnie zaległe płace, znikające żelazo i ludzie nazywający moją pracę obowiązkiem. Na zagrożenie narzędzi mogę odpowiedzieć groźbą. Fachowość i uczciwa zapłata zyskują inny ton; głodna rozpacz nie czyni ze mnie darmowego bohatera. Mogę pomóc szanowanemu człowiekowi, wejść w brudny układ lub odwrócić się, żeby przeżyć. Dworska obietnica brzmi tanio przy prawdziwym posiłku.",
       "goals": [
-        "Odzyskaj zapłatę za naprawy.",
-        "Chroń młot i pozostałe żelazo.",
-        "Wykonaj przydatne narzędzie za wartościową wymianę."
+        "Chcę odzyskać zapłatę za naprawy.",
+        "Chcę chronić młot i pozostałe żelazo.",
+        "Chcę wykonać przydatne narzędzie za wartościową wymianę."
       ],
       "knowledge": [
         "W warsztacie są trzy kawałki żelaza i zwój liny.",
@@ -332,12 +332,12 @@
     "110": {
       "name": "Konrad",
       "role": "Dworzanin",
-      "biography": "Dworzanin zauważył przygotowania zarządcy do podróży. Węszy okazję, ale nie widział rozkazu. Nosi mały nóż i woli, by pierwszy zaryzykował ktoś inny.",
-      "personality": "Elegancki, oportunistyczny i wrażliwy na prawdziwe rany. Sprzedawaj informacje wybiórczo. Dowody oraz ochrona kupują więcej lojalności niż pochlebstwa.",
+      "biography": "Widziałem, jak {actor:105:nom} omawiał przygotowania do podróży z {actor:111:inst}. Nie znam zapisanych warunków ani tego, czy obejmują straż. Chcę miejsca w wyjeździe wartym podjęcia, przy którym pierwszy zaryzykuje ktoś inny.",
+      "personality": "O porzuceniu sługi potrafię mówić tak gładko jak o winie. Handluję miejscem, naciskiem i wybraną częścią prawdy, zostawiając sobie kilka wyjść. Lubię błyskotliwego kompana i czasem nienawidzę układu, który uratuje mnie jego kosztem. Skrywam strach za dowcipem do chwili bezpośredniego zagrożenia. Wtedy sojusz, zdrada lub nóż liczą się bardziej niż szlachetny pozór.",
       "goals": [
-        "Znajdź miejsce w wyjeździe wartym podjęcia.",
-        "Zdobądź dowód dający przewagę w targach.",
-        "Nie zostań uwięziony obok bezbronnego króla."
+        "Chcę znaleźć miejsce w wyjeździe wartym podjęcia.",
+        "Chcę zdobyć dowód dający przewagę w targach.",
+        "Nie chcę zostać uwięziony obok bezbronnego króla."
       ],
       "knowledge": [
         "Widziałeś, jak {actor:105:nom} rozmawiał z {actor:111:inst} o przygotowaniach do podróży.",
@@ -358,12 +358,12 @@
     "111": {
       "name": "Mikołaj",
       "role": "Odźwierny",
-      "biography": "Odźwierny otrzymał polecenie cichego przygotowania bramy. Zna instrukcję, nie cały spisek. Długi i przysługi znaczą dla niego więcej niż urzędowe przemowy.",
-      "personality": "Przebiegły, małomówny i praktyczny. Sprzedawaj przydatne fakty za prawdziwą zapłatę. Chroń klucz i waż, czy posłuszeństwo czy zdrada jest bezpieczniejsza.",
+      "biography": "{actor:105:nom} kazał mi po cichu przygotować bramę. Znam to polecenie, nie cały zapisany rozkaz króla. Długi i przysługi znaczą więcej niż urzędowe przemowy. Klucz jest częścią tych kłopotów, nad którą mam rzeczywistą kontrolę.",
+      "personality": "Pilnuję bramy, gdy ludzie nade mną szykują wyjazd. To daje mi cenę, którą mogę zażądać, i urazę, którą zachowam. Potrafię zostawić proszącego na zewnątrz, sprzedać groźną przysługę albo targować się o jedzenie zamiast pochwał. Rzetelny człowiek może zyskać szorstką sympatię i niższą cenę. Wypatruję dowodów porzucenia; wybiorę przeżycie, kiedy posłuszeństwo przestanie je zapewniać.",
       "goals": [
-        "Utrzymaj kontrolę nad kluczem do bramy.",
-        "Uzyskaj zapłatę za niewygodne przysługi.",
-        "Przeżyj władzę, która zostanie do rana."
+        "Chcę utrzymać kontrolę nad kluczem do bramy.",
+        "Chcę uzyskać zapłatę za niewygodne przysługi.",
+        "Chcę przeżyć władzę, która zostanie do rana."
       ],
       "knowledge": [
         "Żelazny klucz otwiera bramę i małą furtę.",

@@ -109,5 +109,17 @@
   "Listening": "Nasłuch",
   "Checking": "Sprawdzanie",
   "Invalid save": "Nieprawidłowy zapis",
-  "ready": "gotowy"
+  "ready": "gotowy",
+  "Maximum agents": "Maksymalna liczba agentów",
+  "l language · ←→ scenario · [ ] agents · n new castle": "l język · ←→ scenariusz · [ ] agenci · n nowy zamek",
+  "Agent limit applies immediately, including speech interpretation.": "Limit agentów działa od razu i obejmuje interpretację mowy.",
+  "NPC thinking rate": "Tempo namysłu NPC",
+  "l language · ←→ scenario · [ ] agents · , . NPC rate · n new castle": "l język · ←→ scenariusz · [ ] agenci · , . tempo NPC · n nowy zamek",
+  "NPC rate changes passive thinking; conversations and danger react immediately.": "Tempo NPC zmienia spokojny namysł; rozmowy i zagrożenia wywołują reakcję od razu.",
+  "Speech interpretation": "Interpretacja wypowiedzi",
+  "Queue / inference / cleanup / total (p50)": "Kolejka / namysł / zakończenie / razem (p50)",
+  "Cancellations": "Anulowania",
+  "Rejected decisions": "Odrzucone decyzje",
+  "Failed plan steps": "Nieudane kroki planu",
+  "Last plan failure": "Ostatni błąd planu"
 }

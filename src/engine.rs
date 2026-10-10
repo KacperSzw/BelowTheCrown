@@ -292,6 +292,9 @@ impl Engine {
                 decision_version: 0,
                 unconscious_until: None,
                 entered_event_id: 0,
+                last_action_outcome: None,
+                last_plan_failure: None,
+                correction_used: false,
             });
         }
         let mut used = Vec::new();
@@ -439,8 +442,7 @@ impl Engine {
             }
             return self
                 .content
-                .entity_text("actors", id, "name", &self.language)
-                .unwrap_or_else(|| self.authored(&actor.name));
+                .actor_text(id, "name", &actor.name, &self.language);
         }
         for (kind, value) in [
             (
@@ -465,17 +467,25 @@ impl Engine {
     }
     pub fn role(&self, actor: &Actor) -> String {
         self.content
-            .entity_text("actors", actor.id, "role", &self.language)
-            .unwrap_or_else(|| {
-                self.text(
-                    &actor.role,
-                    if actor.role == "Prisoner" {
-                        "Więzień"
-                    } else {
-                        &actor.role
-                    },
-                )
-            })
+            .actor_text(actor.id, "role", &actor.role, &self.language)
+    }
+    pub fn npc_identity(&self, id: u16) -> Result<NpcIdentity> {
+        let actor = self.actor(id)?;
+        ensure!(!self.is_player(id), "Player has no NPC identity");
+        Ok(NpcIdentity {
+            actor_id: id,
+            name: self.name(id),
+            role: self.role(actor),
+            biography: self
+                .content
+                .actor_text(id, "biography", &actor.biography, &self.language),
+            personality: self.content.actor_text(
+                id,
+                "personality",
+                &actor.personality,
+                &self.language,
+            ),
+        })
     }
     fn nearby(&self, id: u16) -> Result<Vec<&Actor>> {
         let actor = self.actor(id)?;
@@ -645,8 +655,17 @@ impl Engine {
         let mut value = json!(actor);
         value["name"] = json!(self.name(actor.id));
         value["role"] = json!(self.role(actor));
-        value["biography"] = json!(self.authored(&actor.biography));
-        value["personality"] = json!(self.authored(&actor.personality));
+        value["biography"] =
+            json!(
+                self.content
+                    .actor_text(actor.id, "biography", &actor.biography, &self.language)
+            );
+        value["personality"] = json!(self.content.actor_text(
+            actor.id,
+            "personality",
+            &actor.personality,
+            &self.language
+        ));
         value["goals"] = json!(
             actor
                 .goals
@@ -770,6 +789,16 @@ impl Engine {
         priority: WakePriority,
         invalidate: bool,
     ) -> Result<()> {
+        self.queue_decision_for(id, reason, priority, invalidate, WakeCause::External)
+    }
+    fn queue_decision_for(
+        &mut self,
+        id: u16,
+        reason: String,
+        priority: WakePriority,
+        invalidate: bool,
+        cause: WakeCause,
+    ) -> Result<()> {
         let actor = self.actor(id)?;
         if self.is_player(id)
             || !actor.awake()
@@ -792,6 +821,9 @@ impl Engine {
             return Ok(());
         }
         let actor = self.actor_mut(id)?;
+        if cause == WakeCause::External {
+            actor.correction_used = false;
+        }
         if invalidate {
             actor.invalidate_decision()?;
             if priority == WakePriority::Danger {
@@ -805,6 +837,7 @@ impl Engine {
             reason,
             priority,
             version,
+            cause,
         };
         if let Some(prior) = self.wakes.get_mut(&id) {
             prior.merge(wake);
@@ -823,14 +856,15 @@ impl Engine {
                 .map(|a| a.id)
                 .collect();
             for id in ids {
-                s.request_decision(
+                s.queue_decision_for(
                     id,
                     s.text(
                         "Choose your next activity for this evening.",
                         "Wybierz następne zajęcie na ten wieczór.",
                     ),
+                    WakePriority::Routine,
                     false,
-                    false,
+                    WakeCause::Initialization,
                 )?;
             }
             Ok(())
@@ -901,7 +935,7 @@ impl Engine {
             let id=s.allocate_id()?;
             let knowledge=template.knowledge.clone();
             let used:Vec<_>=s.world.actors.iter().filter_map(|a|a.portrait_key.clone()).collect();
-            let actor=Actor{id,name:name.clone(),role:"Prisoner".into(),biography:String::new(),personality:template.personality,portrait_key:Some(crate::portraits::portrait_key(id,&used)),room_id:DUNGEON,health:100.0,hunger:template.hunger,thirst:template.thirst,fatigue:template.fatigue,flags:0,coins:template.coins,equipment:vec![],skills:template.skills,known_rooms:template.known_rooms,known_actors:template.known_actors.into_iter().filter(|id|s.world.actors.iter().any(|a|a.id==*id)).collect(),goals:vec![s.content.objective(&s.language)],relationships:BTreeMap::new(),summary:"A prisoner arrives.".into(),activity:None,plan:vec![],accepted_plots:vec![],decision_version:0,unconscious_until:None,entered_event_id:0};
+            let actor=Actor{id,name:name.clone(),role:"Prisoner".into(),biography:String::new(),personality:template.personality,portrait_key:Some(crate::portraits::portrait_key(id,&used)),room_id:DUNGEON,health:100.0,hunger:template.hunger,thirst:template.thirst,fatigue:template.fatigue,flags:0,coins:template.coins,equipment:vec![],skills:template.skills,known_rooms:template.known_rooms,known_actors:template.known_actors.into_iter().filter(|id|s.world.actors.iter().any(|a|a.id==*id)).collect(),goals:vec![s.content.objective(&s.language)],relationships:BTreeMap::new(),summary:"A prisoner arrives.".into(),activity:None,plan:vec![],accepted_plots:vec![],decision_version:0,unconscious_until:None,entered_event_id:0,last_action_outcome:None,last_plan_failure:None,correction_used:false};
             s.world.actors.push(actor);s.world.players.push(HumanPlayer{identity:identity.into(),actor_id:id,listener:false});
             for mut item in source.items.into_iter().filter(|item|item.owner_id==Some(PLAYER)){item.id=s.allocate_id()?;item.owner_id=Some(id);item.poisoned_by=None;item.causes.clear();if item.equipped{s.actor_mut(id)?.equipment.push(item.id);}s.world.items.push(item);}
             for text in knowledge{s.store.remember(Memory{id:0,actor_id:id,time:s.world.time,event_id:None,kind:"background".into(),text:s.authored(&text),importance:8,source_id:Some(id),evidence_ids:vec![]})?;}
@@ -1947,6 +1981,7 @@ impl Engine {
                         target_id,
                         damage,
                         source,
+                        true,
                         causes,
                         self.text(
                             &format!("{}’s attack", self.name(source)),
@@ -2151,6 +2186,7 @@ impl Engine {
         target_id: u16,
         amount: f64,
         source: u16,
+        visible_source: bool,
         causes: Vec<u64>,
         description: String,
     ) -> Result<()> {
@@ -2163,17 +2199,32 @@ impl Engine {
         let room = target.room_id;
         let mut audience = self.witnesses(room);
         audience.push(target_id);
-        let event = self.record(
+        let injury_text = self.text(
+            &format!("{} is hurt by {description}.", self.name(target_id)),
+            &format!("{} odnosi obrażenia: {description}.", self.name(target_id)),
+        );
+        let perceptions = if visible_source {
+            vec![]
+        } else {
+            audience
+                .iter()
+                .map(|id| Perception {
+                    actor_id: *id,
+                    room_id: room,
+                    source_id: None,
+                    text: injury_text.clone(),
+                })
+                .collect()
+        };
+        let event = self.record_with_perceptions(
             "injury",
             Some(source),
             Some(room),
-            self.text(
-                &format!("{} is hurt by {description}.", self.name(target_id)),
-                &format!("{} odnosi obrażenia: {description}.", self.name(target_id)),
-            ),
+            injury_text,
             Some(audience.clone()),
             causes.clone(),
             None,
+            perceptions,
         )?;
         if !self.actor(target_id)?.alive() {
             let target = self.actor_mut(target_id)?;
@@ -2198,17 +2249,32 @@ impl Engine {
             }
             let mut causal = vec![event.id];
             causal.extend(causes);
-            self.record(
+            let death_text = self.text(
+                &format!("{} dies.", self.name(target_id)),
+                &format!("{} umiera.", self.name(target_id)),
+            );
+            let perceptions = if visible_source {
+                vec![]
+            } else {
+                audience
+                    .iter()
+                    .map(|id| Perception {
+                        actor_id: *id,
+                        room_id: room,
+                        source_id: None,
+                        text: death_text.clone(),
+                    })
+                    .collect()
+            };
+            self.record_with_perceptions(
                 "death",
                 Some(source),
                 Some(room),
-                self.text(
-                    &format!("{} dies.", self.name(target_id)),
-                    &format!("{} umiera.", self.name(target_id)),
-                ),
+                death_text,
                 Some(audience.clone()),
                 causal,
                 None,
+                perceptions,
             )?;
             if target_id == KING {
                 self.world.winner_id = self.credited_player(source, target_id);
@@ -2313,6 +2379,7 @@ impl Engine {
                 }
             }
         }
+        self.remember_outcome(id, intent, &result, true)?;
         Ok(result)
     }
     fn execute_action(
@@ -2465,12 +2532,20 @@ impl Engine {
                     .into_iter()
                     .map(|a| (a.id, a.role.clone()))
                     .collect();
-                for (witness, role) in neighbors {
+                for (witness, _role) in neighbors {
                     if !self.actor(id)?.known_actors.contains(&witness) {
                         self.actor_mut(id)?.known_actors.push(witness);
                     }
                     if witness != id && noticed {
-                        self.request_decision(witness,self.text(if self.is_player(id) && role.to_lowercase().contains("guard"){"A prisoner has entered your room. Decide whether to challenge them."}else{"Someone has entered your room. Reassess the situation."},"Ktoś wszedł do pomieszczenia. Oceń sytuację."),false,true)?;
+                        self.request_decision(
+                            witness,
+                            self.text(
+                                "Someone has entered your room. Reassess the situation.",
+                                "Ktoś wszedł do pomieszczenia. Oceń sytuację.",
+                            ),
+                            false,
+                            true,
+                        )?;
                     }
                 }
                 // Departure invalidates inference based on an actor who is no longer present.
@@ -2506,6 +2581,7 @@ impl Engine {
                         id,
                         trap.power,
                         trap.setter,
+                        false,
                         trap.causes,
                         self.text("a hidden tripline", "ukryta lina-pułapka"),
                     )?;
@@ -3557,44 +3633,6 @@ impl Engine {
                 explicit: true,
                 accepted_event_id: None,
             });
-        } else if self.is_player(id)
-            && actor.known_actors.contains(&KING)
-            && self.actor(KING)?.alive()
-        {
-            for listener in audience
-                .iter()
-                .copied()
-                .filter(|listener| {
-                    *listener != id
-                        && !self.is_player(*listener)
-                        && *listener != KING
-                        && self
-                            .actor(*listener)
-                            .is_ok_and(|a| a.known_actors.contains(&KING))
-                })
-                .collect::<Vec<_>>()
-            {
-                if self.world.next_plot_id > 65535 {
-                    break;
-                }
-                let projected = event
-                    .projected(listener)
-                    .context("Missing speech projection.")?;
-                if projected.actor_id != Some(id) {
-                    continue;
-                }
-                self.world.plots.push(Plot {
-                    id: self.world.next_plot_id as u16,
-                    proposer: id,
-                    recipient: listener,
-                    victim: KING,
-                    event_id: event.id,
-                    accepted: false,
-                    explicit: false,
-                    accepted_event_id: None,
-                });
-                self.world.next_plot_id += 1;
-            }
         }
         if volume == Volume::Whisper {
             let bystanders: Vec<_> = self
@@ -3728,7 +3766,7 @@ impl Engine {
                 }
                 s.world.interaction_time = next;
                 s.world.time = calendar + (next - current) * CLOCK_RATE;
-                s.update_needs((next - current) * CLOCK_RATE)?;
+                s.update_needs((next - current) * PHYSIOLOGY_RATE)?;
                 let recovery: Vec<_> = s
                     .world
                     .actors
@@ -3792,6 +3830,7 @@ impl Engine {
                     let Some(activity) = activity else {
                         continue;
                     };
+                    s.actor_mut(actor_id)?.invalidate_decision()?;
                     let failure = if s.actor(actor_id)?.awake() {
                         let result =
                             s.execute(actor_id, activity.intent, activity.causes.clone())?;
@@ -3799,7 +3838,7 @@ impl Engine {
                     } else {
                         None
                     };
-                    s.run_plan(actor_id, activity.causes, failure)?;
+                    s.run_plan(actor_id, activity.causes, failure, true)?;
                 }
                 let encounters: Vec<_> = s.world.encounters.iter().map(|e| e.id.clone()).collect();
                 for encounter in encounters {
@@ -3819,6 +3858,7 @@ impl Engine {
                         effect.actor_id,
                         effect.damage,
                         effect.source_id,
+                        false,
                         effect.causes.clone(),
                         s.text("poison", "trucizna"),
                     )?;
@@ -3928,6 +3968,7 @@ impl Engine {
                     id,
                     damage,
                     id,
+                    true,
                     vec![],
                     self.text(
                         if thirst { "dehydration" } else { "starvation" },
@@ -3940,7 +3981,58 @@ impl Engine {
         }
         Ok(())
     }
-    fn run_plan(&mut self, id: u16, causes: Vec<u64>, mut failure: Option<String>) -> Result<()> {
+    fn remember_outcome(
+        &mut self,
+        id: u16,
+        intent: Intent,
+        result: &ActionResult,
+        completed: bool,
+    ) -> Result<()> {
+        let progress = completed
+            && result.ok
+            && !matches!(
+                intent,
+                Intent::Speak { .. }
+                    | Intent::Inspect { .. }
+                    | Intent::Wait { .. }
+                    | Intent::Guard { .. }
+                    | Intent::Hide { .. }
+                    | Intent::Defend { .. }
+            );
+        let outcome = ActionOutcome {
+            intent,
+            ok: result.ok,
+            reason: result.message.clone(),
+            time: self.world.time,
+        };
+        let actor = self.actor_mut(id)?;
+        actor.last_action_outcome = Some(outcome.clone());
+        if !result.ok {
+            actor.last_plan_failure = Some(outcome);
+        }
+        if progress {
+            actor.correction_used = false;
+        }
+        Ok(())
+    }
+    pub fn claim_correction(&mut self, id: u16) -> Result<bool> {
+        self.mutate(|s| {
+            let actor = s.actor_mut(id)?;
+            let available = !actor.correction_used;
+            actor.correction_used = true;
+            Ok(available)
+        })
+    }
+    fn run_plan(
+        &mut self,
+        id: u16,
+        causes: Vec<u64>,
+        mut failure: Option<String>,
+        completed: bool,
+    ) -> Result<()> {
+        if failure.is_some() {
+            self.actor_mut(id)?.plan.clear();
+        }
         let mut steps = 0;
         while !self.actor(id)?.plan.is_empty()
             && self.actor(id)?.activity.is_none()
@@ -3951,6 +4043,7 @@ impl Engine {
             ensure!(steps <= 6, "Action plan exceeded its maximum length.");
             let intent = self.actor_mut(id)?.plan.remove(0);
             if let Err(error) = self.validate_intent(id, &intent) {
+                self.remember_outcome(id, intent, &ActionResult::fail(error.to_string()), false)?;
                 failure = Some(error.to_string());
                 self.actor_mut(id)?.plan.clear();
                 let room = self.actor(id)?.room_id;
@@ -3968,8 +4061,9 @@ impl Engine {
                 )?;
                 break;
             }
-            let result = self.begin(id, intent, causes.clone())?;
+            let result = self.begin(id, intent.clone(), causes.clone())?;
             if !result.ok {
+                self.remember_outcome(id, intent, &result, false)?;
                 failure = Some(result.message);
                 self.actor_mut(id)?.plan.clear();
                 break;
@@ -3982,7 +4076,21 @@ impl Engine {
             && self.actor(id)?.awake()
             && self.encounter(id).is_none()
         {
-            self.request_decision(
+            let cause = if failure.is_some() {
+                WakeCause::PlanFailed
+            } else {
+                WakeCause::ActivityEnded
+            };
+            if failure.is_some() {
+                let actor = self.actor_mut(id)?;
+                if actor.correction_used {
+                    return Ok(());
+                }
+                actor.correction_used = true;
+            } else if !completed {
+                return Ok(());
+            }
+            self.queue_decision_for(
                 id,
                 failure.map_or_else(
                     || self.text("Your planned activity has ended.", "Twoje zaplanowane zajęcie dobiegło końca."),
@@ -3991,8 +4099,9 @@ impl Engine {
                         &format!("Twój plan został przerwany: {error} Wybierz legalne działanie na podstawie aktualnych faktów."),
                     ),
                 ),
+                WakePriority::Routine,
                 false,
-                false,
+                cause,
             )?;
         }
         Ok(())
@@ -4093,7 +4202,7 @@ impl Engine {
                 };
             let result = s.begin(id, first, vec![source_id])?;
             if s.actor(id)?.activity.is_none() {
-                s.run_plan(id, vec![source_id], None)?;
+                s.run_plan(id, vec![source_id], None, false)?;
             }
             Ok(result)
         })
@@ -4171,7 +4280,7 @@ impl Engine {
             let valid = self.world.plots.iter().find(|p| {
                 p.id == *plot_id
                     && p.recipient == id
-                    && !p.accepted
+                    && (p.explicit || p.accepted)
                     && actor.known_actors.contains(&p.victim)
             });
             let Some(plot) = valid else {
@@ -4192,6 +4301,33 @@ impl Engine {
                 ))
                 .value());
             }
+        }
+        let mut heard = Vec::new();
+        for proposal in &decision.accept_heard_proposals {
+            let memory = self.store.owned_memory(id, proposal.memory_id)?;
+            let valid = recalled.contains(&proposal.memory_id)
+                && actor.known_actors.contains(&proposal.victim_id)
+                && self.actor(proposal.victim_id).is_ok_and(Actor::alive)
+                && memory.as_ref().is_some_and(|m| {
+                    m.kind == "heard" && m.source_id.is_some_and(|source| source != id)
+                });
+            let event = match memory.as_ref().and_then(|m| m.event_id) {
+                Some(event) => self.store.observed_event(id, event)?,
+                None => None,
+            };
+            if !valid
+                || event.as_ref().is_none_or(|e| {
+                    e.kind != "speech" || e.actor_id != memory.as_ref().and_then(|m| m.source_id)
+                })
+            {
+                return Ok(ActionResult::fail(self.text("A proposal must cite an identified speaker’s words supplied from your own hearing.", "Propozycja musi odwoływać się do podanych słów rozpoznanego rozmówcy, które samodzielnie słyszysz.")).value());
+            }
+            let event = event.context("Missing heard event")?;
+            heard.push((
+                event.actor_id.context("Missing proposer")?,
+                event.id,
+                proposal.victim_id,
+            ));
         }
         let in_combat = self.encounter(id).is_some();
         let busy = actor
@@ -4243,7 +4379,9 @@ impl Engine {
         {
             return Ok(ActionResult::fail(self.text("Choose exactly one attack, subdue, defend, or flee, with at most one optional speech.","Wybierz dokładnie jeden atak, obezwładnienie, obronę lub ucieczkę, z najwyżej jedną wypowiedzią.")).value());
         }
-        if let Err(error) = self.validate_intent(id, &decision.plan[0]) {
+        if let Some(first) = decision.plan.first()
+            && let Err(error) = self.validate_intent(id, first)
+        {
             return Ok(ActionResult::fail(error.to_string()).value());
         }
         if in_combat && let Err(error) = self.validate_intent(id, &physical[0]) {
@@ -4288,7 +4426,39 @@ impl Engine {
                 relationship.respect =
                     (relationship.respect + f64::from(update.respect)).clamp(-100.0, 100.0);
             }
-            for plot_id in decision.accept_plots {
+            let mut accept_plots = decision.accept_plots;
+            for (proposer, event_id, victim) in heard {
+                let plot_id = if let Some(plot) = s.world.plots.iter().find(|p| {
+                    p.proposer == proposer
+                        && p.recipient == id
+                        && p.victim == victim
+                        && p.event_id == event_id
+                }) {
+                    plot.id
+                } else {
+                    ensure!(
+                        s.world.next_plot_id <= u32::from(u16::MAX),
+                        "Plot IDs exhausted"
+                    );
+                    let plot_id = s.world.next_plot_id as u16;
+                    s.world.next_plot_id += 1;
+                    s.world.plots.push(Plot {
+                        id: plot_id,
+                        proposer,
+                        recipient: id,
+                        victim,
+                        event_id,
+                        accepted: false,
+                        explicit: false,
+                        accepted_event_id: None,
+                    });
+                    plot_id
+                };
+                if !accept_plots.contains(&plot_id) {
+                    accept_plots.push(plot_id);
+                }
+            }
+            for plot_id in accept_plots {
                 let plot = s
                     .world
                     .plots
@@ -4296,6 +4466,9 @@ impl Engine {
                     .find(|p| p.id == plot_id)
                     .context("Missing plot.")?
                     .clone();
+                if plot.accepted {
+                    continue;
+                }
                 let room = s.actor(id)?.room_id;
                 let event = s.record(
                     "private",
@@ -4331,7 +4504,8 @@ impl Engine {
             }
             if preserve_activity {
                 for intent in decision.plan {
-                    s.execute(id, intent, vec![])?;
+                    let result = s.execute(id, intent, vec![])?;
+                    ensure!(result.ok, "{}", result.message);
                 }
             } else if in_combat {
                 if let Some(speech) = decision
@@ -4343,7 +4517,7 @@ impl Engine {
                 }
                 s.begin(id, physical[0].clone(), vec![])?;
             } else {
-                s.run_plan(id, vec![], None)?;
+                s.run_plan(id, vec![], None, false)?;
             }
             Ok(ActionResult::ok(s.text(
                 "The character’s decision is accepted.",
@@ -4351,6 +4525,7 @@ impl Engine {
             )))
         })
         .map(ActionResult::value)
+        .or_else(|error| Ok(ActionResult::fail(error.to_string()).value()))
     }
     pub fn recall(&self, id: u16, query: &str) -> Result<Value> {
         self.actor(id)?;
@@ -4367,17 +4542,23 @@ impl Engine {
         let described = self.describe_actor(actor);
         let query = format!(
             "{reason} {} {} {}",
-            actor.goals.join(" "),
+            actor
+                .goals
+                .iter()
+                .map(|goal| self.authored(goal))
+                .collect::<Vec<_>>()
+                .join(" "),
             self.name(actor.room_id),
             self.nearby(id)?
                 .iter()
+                .filter(|a| a.id != id)
                 .map(|a| self.name(a.id))
                 .collect::<Vec<_>>()
                 .join(" ")
         );
-        let mut memories = self.store.recall(id, &query, 24)?;
         let dialogue = self.store.recent_dialogue(id, 8, 4)?;
-        memories.retain(|memory| !dialogue.iter().any(|heard| heard.id == memory.id));
+        let dialogue_ids = dialogue.iter().map(|memory| memory.id).collect::<Vec<_>>();
+        let memories = self.store.recall_excluding(id, &query, 24, &dialogue_ids)?;
         let mut evidence: Vec<_> = memories.iter().chain(&dialogue).map(|m| m.id).collect();
         evidence.sort_unstable();
         evidence.dedup();
@@ -4393,7 +4574,7 @@ impl Engine {
             .world
             .plots
             .iter()
-            .filter(|p| p.recipient == id)
+            .filter(|p| p.recipient == id && p.explicit && !p.accepted)
             .rev()
             .take(8)
             .map(|plot| {
@@ -4408,8 +4589,42 @@ impl Engine {
                 value
             })
             .collect::<Vec<_>>();
+        let commitments = self
+            .world
+            .plots
+            .iter()
+            .filter(|p| p.recipient == id && p.accepted)
+            .map(|plot| {
+                let mut value = json!(plot);
+                value["speech"] = json!(
+                    self.store
+                        .observed_event(id, plot.event_id)
+                        .ok()
+                        .flatten()
+                        .map(|e| e.text)
+                );
+                value
+            })
+            .collect::<Vec<_>>();
+        let available_actions = self
+            .actions(id)?
+            .into_iter()
+            .filter(|action| action["available"] == true)
+            .map(|action| action["intent"].clone())
+            .collect::<Vec<_>>();
+        let mut recipes = json!([{"recipe":"meal","roomId":4,"skill":"craft","minimum":20,"consumes":"ingredient"},{"recipe":"lockpick","roomId":8,"skill":"craft","minimum":25,"consumes":"metal"},{"recipe":"medicine","roomId":7,"skill":"medicine","minimum":50,"consumes":"herb"}]);
+        for recipe in recipes.as_array_mut().expect("recipe array") {
+            let intent = Intent::Work {
+                recipe: serde_json::from_value(recipe["recipe"].clone())?,
+            };
+            recipe["availableNow"] = json!(
+                self.validate_intent(id, &intent)
+                    .and_then(|_| self.check_busy(id, &intent))
+                    .is_ok()
+            );
+        }
         Ok(
-            json!({"context":{"branch":self.world.branch,"version":actor.decision_version,"evidenceIds":evidence,"combat":self.combat_context(id)},"input":{"language":self.language,"scenarioId":self.world.scenario_id,"time":self.world.time,"timeRules":{"calendarSecondsPerRealSecond":CLOCK_RATE,"activitySecondsAre":"calendar","reactionSchedulingUses":"real seconds"},"reason":reason,"combat":self.combat_view(id)?,"speechRule":if self.world.mode=="multiplayer"{"Normal speech stays in this room. Shouts reach adjoining rooms, with partially heard words. Never whisper."}else{"Speech follows normal, whisper and shout perception."},"self":{"id":id,"name":described["name"],"aliases":if self.is_player(id){vec![]}else{self.content.aliases(id)},"role":described["role"],"biography":described["biography"],"personality":described["personality"],"health":actor.health,"hunger":actor.hunger,"thirst":actor.thirst,"fatigue":actor.fatigue,"coins":actor.coins,"skills":actor.skills,"condition":self.condition(actor),"goals":described["goals"],"relationships":actor.relationships,"lastSummary":described["summary"],"activity":self.activity_text(actor)},"room":self.describe_room(actor.room_id)?,"doors":doors,"people":people,"items":items,"knownPeople":known_people,"knownMap":known_map,"offers":self.world.offers.iter().filter(|o|o.to==id && o.status=="open" && !self.offer_expired(o)).collect::<Vec<_>>(),"plots":plots,"memories":memories.iter().map(|m|self.describe_memory(m)).collect::<Vec<_>>(),"recentDialogue":dialogue.iter().map(|m|self.describe_memory(m)).collect::<Vec<_>>(),"recipes":[{"recipe":"meal","roomId":4,"skill":"craft","minimum":20,"consumes":"ingredient"},{"recipe":"lockpick","roomId":8,"skill":"craft","minimum":25,"consumes":"metal"},{"recipe":"medicine","roomId":7,"skill":"medicine","minimum":50,"consumes":"herb"}]}}),
+            json!({"context":{"branch":self.world.branch,"version":actor.decision_version,"evidenceIds":evidence,"combat":self.combat_context(id)},"input":{"language":self.language,"scenarioId":self.world.scenario_id,"time":self.world.time,"timeRules":{"calendarSecondsPerRealSecond":CLOCK_RATE,"activitySecondsAre":"calendar","reactionSchedulingUses":"real seconds"},"reason":reason,"combat":self.combat_view(id)?,"speechRule":if self.world.mode=="multiplayer"{"Normal speech stays in this room. Shouts reach adjoining rooms, with partially heard words. Never whisper."}else{"Speech follows normal, whisper and shout perception."},"self":{"id":id,"name":described["name"],"aliases":if self.is_player(id){vec![]}else{self.content.aliases(id)},"role":described["role"],"biography":described["biography"],"personality":described["personality"],"health":actor.health,"hunger":actor.hunger,"thirst":actor.thirst,"fatigue":actor.fatigue,"coins":actor.coins,"skills":actor.skills,"condition":self.condition(actor),"goals":described["goals"],"relationships":actor.relationships,"lastSummary":described["summary"],"activity":self.activity_text(actor),"currentActivity":self.current_activity(actor),"remainingPlan":actor.plan,"commitments":commitments,"lastActionOutcome":actor.last_action_outcome,"lastPlanFailure":actor.last_plan_failure},"room":self.describe_room(actor.room_id)?,"doors":doors,"people":people,"items":items,"knownPeople":known_people,"knownMap":known_map,"offers":self.world.offers.iter().filter(|o|o.to==id && o.status=="open" && !self.offer_expired(o)).collect::<Vec<_>>(),"plots":plots,"memories":memories.iter().map(|m|self.describe_memory(m)).collect::<Vec<_>>(),"recentDialogue":dialogue.iter().map(|m|self.describe_memory(m)).collect::<Vec<_>>(),"recipes":recipes,"availableActions":available_actions}}),
         )
     }
 
@@ -4437,17 +4652,29 @@ impl Engine {
         if !door.rooms.contains(&traveller.room_id) {
             return Ok(Value::Null);
         }
-        let remaining = (activity
-            .interaction_ends
-            .unwrap_or(self.world.interaction_time)
-            - self.world.interaction_time)
-            .max((activity.ends - self.world.time) / CLOCK_RATE)
-            .max(0.0);
+        let remaining = self.activity_remaining(activity);
         let mut value = json!({"origin":self.name(traveller.room_id),"destination":self.name(self.destination(door,traveller.room_id)),"remainingSeconds":remaining});
         if let Some(escort) = escort {
             value["escortedBy"] = json!(self.name(escort.id));
         }
         Ok(value)
+    }
+    fn activity_remaining(&self, activity: &Activity) -> f64 {
+        (activity
+            .interaction_ends
+            .unwrap_or(self.world.interaction_time)
+            - self.world.interaction_time)
+            .max((activity.ends - self.world.time) / CLOCK_RATE)
+            .max(0.0)
+    }
+    fn current_activity(&self, actor: &Actor) -> Value {
+        actor.activity.as_ref().map_or(Value::Null, |activity| {
+            json!({
+                "intent":activity.intent,"started":activity.started,"ends":activity.ends,
+                "remainingCalendarSeconds":(activity.ends-self.world.time).max(0.0),
+                "remainingRealSeconds":self.activity_remaining(activity)
+            })
+        })
     }
     pub fn combat_view(&self, id: u16) -> Result<Value> {
         let Some(encounter) = self.encounter(id) else {
@@ -4463,6 +4690,18 @@ impl Engine {
             .find(|p| p.actor_id == id)
             .context("Missing combat participant.")?;
         let opponents = encounter
+            .participants
+            .iter()
+            .filter(|p| p.actor_id != id)
+            .filter(|p| {
+                encounter.hostility.contains(&[id, p.actor_id])
+                    || encounter.hostility.contains(&[p.actor_id, id])
+            })
+            .filter_map(|p| self.actor(p.actor_id).ok())
+            .filter(|a| a.alive() && a.room_id == encounter.room_id)
+            .map(|a| json!({"id":a.id,"name":self.name(a.id),"condition":self.condition(a)}))
+            .collect::<Vec<_>>();
+        let participants = encounter
             .participants
             .iter()
             .filter(|p| p.actor_id != id)
@@ -4503,7 +4742,7 @@ impl Engine {
             }
         }
         Ok(
-            json!({"encounterId":encounter.id,"round":encounter.round.max(participant.joins_round),"remainingSeconds":(encounter.deadline-self.world.interaction_time).max(0.0),"choice":participant.choice,"joining":participant.joins_round>encounter.round,"opponents":opponents,"choices":choices}),
+            json!({"encounterId":encounter.id,"round":encounter.round.max(participant.joins_round),"remainingSeconds":(encounter.deadline-self.world.interaction_time).max(0.0),"choice":participant.choice,"joining":participant.joins_round>encounter.round,"participants":participants,"opponents":opponents,"choices":choices}),
         )
     }
     fn action_command(&self, id: u16, intent: &Intent) -> String {

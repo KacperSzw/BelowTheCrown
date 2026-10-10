@@ -741,6 +741,26 @@ impl WorldContent {
             .unwrap_or(source)
             .to_owned()
     }
+    /// Saved custom fields remain literal; only values authored for this exact field localize.
+    pub fn actor_text(&self, id: u16, field: &str, source: &str, language: &str) -> String {
+        let path = format!("actors.{id}.{field}");
+        if self.authored_paths.get(source) == Some(&path)
+            || self
+                .texts
+                .values()
+                .any(|text| at(text, &path).and_then(Value::as_str) == Some(source))
+            || self.scenario["actors"].as_array().is_some_and(|actors| {
+                actors
+                    .iter()
+                    .any(|actor| actor["id"] == id && actor[field].as_str() == Some(source))
+            })
+        {
+            self.entity_text("actors", id, field, language)
+                .unwrap_or_else(|| source.to_owned())
+        } else {
+            source.to_owned()
+        }
+    }
 
     pub fn instructions(&self, kind: &str, language: &str) -> String {
         self.prompts

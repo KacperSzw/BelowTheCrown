@@ -329,6 +329,8 @@ pub struct Setup {
     pub language: String,
     pub scenario: String,
     pub network: Network,
+    pub max_agents: usize,
+    pub npc_update_rate: u8,
     pub start: Start,
     pub saves: Vec<String>,
 }
@@ -376,7 +378,7 @@ pub async fn setup(mut settings: Setup) -> Result<Setup> {
             let width = frame.area().width;
             let title = ui::title(
                 usize::from(width),
-                usize::from(frame.area().height.saturating_sub(9)),
+                usize::from(frame.area().height.saturating_sub(15)),
                 ui::local_braille_support(),
             );
             let top = (title.len() + usize::from(!title.is_empty())) as u16;
@@ -425,18 +427,42 @@ pub async fn setup(mut settings: Setup) -> Result<Setup> {
                         }
                     },
                 ),
+                (
+                    tr(&settings.language, "Maximum agents", &[]),
+                    settings.max_agents.to_string(),
+                ),
+                (
+                    tr(&settings.language, "NPC thinking rate", &[]),
+                    format!("{}×", settings.npc_update_rate),
+                ),
                 (tr(&settings.language, "Start", &[]), String::new()),
             ];
-            let mut lines = vec![Line::from("")];
+            let mut lines = Vec::new();
+            let mut selected_line = 0;
             for (index, (label, value)) in rows.into_iter().enumerate() {
+                if index == selected {
+                    selected_line = lines.len() as u16;
+                }
                 let prefix = if index == selected { "› " } else { "  " };
                 lines.push(Line::styled(
-                    format!("{prefix}{label:<18} {value}"),
+                    if width >= 50 {
+                        format!("{prefix}{label:<18} {value}")
+                    } else {
+                        format!("{prefix}{label}: {value}")
+                    },
                     Style::default().fg(if index == selected { AMBER } else { PALE }),
                 ));
-                lines.push(Line::from(""));
+                if areas[1].height >= 15 {
+                    lines.push(Line::from(""));
+                }
             }
-            frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), areas[1]);
+            frame.render_widget(
+                Paragraph::new(lines).scroll((
+                    selected_line.saturating_sub(areas[1].height.saturating_sub(1)),
+                    0,
+                )),
+                areas[1],
+            );
             frame.render_widget(
                 Paragraph::new(tr(
                     &settings.language,
@@ -453,8 +479,8 @@ pub async fn setup(mut settings: Setup) -> Result<Setup> {
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     bail!("Setup cancelled")
                 }
-                KeyCode::Up => selected = (selected + 4) % 5,
-                KeyCode::Down | KeyCode::Tab => selected = (selected + 1) % 5,
+                KeyCode::Up => selected = (selected + 6) % 7,
+                KeyCode::Down | KeyCode::Tab => selected = (selected + 1) % 7,
                 KeyCode::Enter => return Ok(settings),
                 KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') => {
                     let reverse = key.code == KeyCode::Left;
@@ -483,6 +509,17 @@ pub async fn setup(mut settings: Setup) -> Result<Setup> {
                         3 => {
                             settings.start = cycle_start(&settings.start, &settings.saves, reverse);
                         }
+                        4 => {
+                            settings.max_agents = if reverse {
+                                settings.max_agents.saturating_sub(1).max(1)
+                            } else {
+                                (settings.max_agents + 1).min(32)
+                            }
+                        }
+                        5 => {
+                            settings.npc_update_rate =
+                                cycle_npc_rate(settings.npc_update_rate, reverse)
+                        }
                         _ => return Ok(settings),
                     }
                 }
@@ -491,6 +528,11 @@ pub async fn setup(mut settings: Setup) -> Result<Setup> {
             _ => {}
         }
     }
+}
+fn cycle_npc_rate(current: u8, reverse: bool) -> u8 {
+    let rates = [1, 5, 15];
+    let index = rates.iter().position(|rate| *rate == current).unwrap_or(1);
+    rates[(index + if reverse { 2 } else { 1 }) % rates.len()]
 }
 
 fn cycle(options: &[String], current: &str, reverse: bool) -> String {
@@ -628,8 +670,10 @@ impl ManagerUi {
         let footer = vec![
             Line::styled(
                 format!(
-                    "{} · {} {} · {} {} · p50 {} / p95 {}",
-                    self.text("Thinking") + " " + &metrics["active"].to_string(),
+                    "{} {}/{} · {} {} · {} {} · p50 {} / p95 {}",
+                    self.text("Thinking"),
+                    metrics["active"],
+                    self.view["maxAgents"].as_u64().unwrap_or(5),
                     metrics["calls"],
                     self.text("calls"),
                     metrics["tokens"],
@@ -712,6 +756,42 @@ impl ManagerUi {
             format!("{}: {connected}", self.text("Connected")),
             Style::default().fg(SAGE),
         ));
+        lines.push(Line::from(""));
+        for (kind, title) in [("npc", "NPC"), ("listener", "Speech interpretation")] {
+            let metrics = &self.view["metrics"][kind];
+            let median = |field: &str| {
+                metrics[field]["p50"]
+                    .as_f64()
+                    .map(|ms| format!("{:.2}s", ms / 1000.))
+                    .unwrap_or_else(|| "—".into())
+            };
+            lines.push(Line::styled(
+                format!(
+                    "{}: {} {} · {}",
+                    self.text(title),
+                    metrics["calls"],
+                    self.text("calls"),
+                    self.text("Queue / inference / cleanup / total (p50)")
+                ),
+                Style::default().fg(ASH),
+            ));
+            lines.push(Line::raw(format!(
+                "{} / {} / {} / {}",
+                median("queueMs"),
+                median("inferenceMs"),
+                median("cleanupMs"),
+                median("totalMs")
+            )));
+            lines.push(Line::raw(format!(
+                "{}: {} · {}: {} · {}: {}",
+                self.text("Cancellations"),
+                metrics["cancellations"],
+                self.text("Rejected decisions"),
+                metrics["rejections"],
+                self.text("Failed plan steps"),
+                metrics["executionFailures"]
+            )));
+        }
         lines.push(Line::from(""));
         let mut rooms = std::collections::BTreeMap::<String, Vec<&Value>>::new();
         for actor in actors {
@@ -855,6 +935,16 @@ impl ManagerUi {
                         Style::default().fg(BLOOD),
                     ));
                 }
+                if let Some(failure) = actor["lastPlanFailure"].as_object() {
+                    detail.push(Line::styled(
+                        format!(
+                            "{}: {}",
+                            self.text("Last plan failure"),
+                            failure.get("reason").and_then(Value::as_str).unwrap_or("")
+                        ),
+                        Style::default().fg(BLOOD),
+                    ));
+                }
             }
             2 => {
                 if let Some(memories) = selected["memories"].as_array() {
@@ -965,7 +1055,25 @@ impl ManagerUi {
                 Style::default().fg(AMBER),
             ),
             Line::from(""),
-            Line::raw(self.text("l change language · ←→ change scenario · n new castle")),
+            Line::styled(
+                format!(
+                    "{}: {}",
+                    self.text("Maximum agents"),
+                    self.view["maxAgents"]
+                ),
+                Style::default().fg(AMBER),
+            ),
+            Line::styled(
+                format!(
+                    "{}: {}×",
+                    self.text("NPC thinking rate"),
+                    self.view["npcUpdateRate"]
+                ),
+                Style::default().fg(AMBER),
+            ),
+            Line::raw(
+                self.text("l language · ←→ scenario · [ ] agents · , . NPC rate · n new castle"),
+            ),
             Line::from(""),
             Line::styled(
                 self.text("Language applies when starting or restoring a castle."),
@@ -973,7 +1081,13 @@ impl ManagerUi {
             ),
             Line::from(""),
             Line::raw(self.text("One game day = one real hour. Pauses freeze the world.")),
+            Line::raw(self.text(
+                "NPC rate changes passive thinking; conversations and danger react immediately.",
+            )),
             Line::raw(self.text("NPCs use Luna/high at standard speed.")),
+            Line::raw(
+                self.text("Agent limit applies immediately, including speech interpretation."),
+            ),
             Line::raw(self.text("Sound is local to this manager; SSH stays silent.")),
         ];
         frame.render_widget(Paragraph::new(rows).wrap(Wrap { trim: false }), area);
@@ -1137,6 +1251,14 @@ pub async fn run(link: Link, directory: &Path, owns_host: bool, audio: bool) -> 
                 KeyCode::Left | KeyCode::Right if ui.page == 3 => Some((
                     "settings",
                     json!({"scenario":cycle(&scenario_ids(),string(&ui.view,"pendingScenario"),key.code==KeyCode::Left)}),
+                )),
+                KeyCode::Char('[') | KeyCode::Char(']') if ui.page == 3 => Some((
+                    "settings",
+                    json!({"maxAgents": if key.code == KeyCode::Char('[') { ui.view["maxAgents"].as_u64().unwrap_or(5).saturating_sub(1).max(1) } else { (ui.view["maxAgents"].as_u64().unwrap_or(5) + 1).min(32) }}),
+                )),
+                KeyCode::Char(',') | KeyCode::Char('.') if ui.page == 3 => Some((
+                    "settings",
+                    json!({"npcUpdateRate":cycle_npc_rate(ui.view["npcUpdateRate"].as_u64().unwrap_or(5) as u8,key.code==KeyCode::Char(','))}),
                 )),
                 KeyCode::Char('c') => {
                     ui.message = match launch_player(directory, &ui.view) {

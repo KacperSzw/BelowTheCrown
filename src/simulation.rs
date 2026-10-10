@@ -1,15 +1,15 @@
 use crate::{
     codex::{
-        CodexDriver, DecisionDriver, RecallRequest, ThinkRequest, ThinkResult, WorkerOptions,
-        safe_error,
+        CodexDriver, DecisionDriver, DecisionToken, RecallRequest, ThinkRequest, ThinkResult,
+        WorkerOptions, safe_error,
     },
     content::WorldContent,
     engine::Engine,
-    model::{EFFORT, MODEL, Wake, WakePriority},
+    model::{EFFORT, MODEL, Wake, WakeCause, WakePriority},
     paths::write_private,
     runtime::{GameHandle, HostInfo, PlayerConnection, RuntimeRequest},
 };
-use anyhow::{Result, bail, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
@@ -22,6 +22,7 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone, Debug)]
 pub struct Scheduling {
     pub maximum_calls: usize,
+    pub npc_update_rate: u8,
     pub background_interval: f64,
     pub aging: f64,
     pub timeout: Duration,
@@ -29,11 +30,23 @@ pub struct Scheduling {
 impl Default for Scheduling {
     fn default() -> Self {
         Self {
-            maximum_calls: 4,
-            background_interval: 30.,
+            maximum_calls: 5,
+            npc_update_rate: 5,
+            background_interval: 60.,
             aging: 30.,
             timeout: Duration::from_secs(120),
         }
+    }
+}
+impl Scheduling {
+    pub fn set_npc_update_rate(&mut self, rate: u8) -> Result<()> {
+        ensure!(
+            matches!(rate, 1 | 5 | 15),
+            "NPC update rate must be 1, 5 or 15"
+        );
+        self.npc_update_rate = rate;
+        self.background_interval = 300. / f64::from(rate);
+        Ok(())
     }
 }
 
@@ -55,9 +68,11 @@ struct Message {
     visit: String,
     combat: Option<Value>,
     order: u64,
+    created: f64,
 }
 struct Job {
     id: u64,
+    generation: u64,
     actor: u16,
     listener: bool,
     branch: String,
@@ -76,6 +91,17 @@ struct Completion {
     actor: u16,
     listener: bool,
     result: Result<ThinkResult>,
+    queued_ms: f64,
+    duration_ms: f64,
+    generation: u64,
+}
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Timing {
+    queue_ms: f64,
+    inference_ms: f64,
+    cleanup_ms: f64,
+    total_ms: f64,
 }
 #[derive(Default)]
 struct Status {
@@ -87,6 +113,11 @@ struct Status {
     state: String,
     summary: String,
     plan: Value,
+    timing: Option<Timing>,
+    cancellations: u64,
+    rejections: u64,
+    execution_failures: u64,
+    seen_failure: Option<Value>,
 }
 
 pub struct Simulation {
@@ -106,11 +137,13 @@ pub struct Simulation {
     queued: BTreeMap<u16, Queued>,
     jobs: HashMap<(u16, bool), Job>,
     inflight: HashMap<u64, (u16, bool)>,
+    background_inflight: HashSet<u64>,
     deferred: VecDeque<Completion>,
     messages: VecDeque<Message>,
     statuses: HashMap<(u16, bool), Status>,
     room_last: HashMap<u16, u64>,
     sequence: u64,
+    context_generation: u64,
     wall: f64,
     last_idle: f64,
     observing: bool,
@@ -119,7 +152,7 @@ pub struct Simulation {
     pending_scenario: String,
     error: Option<String>,
     stopped: bool,
-    latencies: VecDeque<f64>,
+    latencies: VecDeque<(bool, Timing)>,
 }
 
 impl Simulation {
@@ -172,6 +205,7 @@ impl Simulation {
         let language = engine.language.clone();
         let scenario = engine.world.scenario_id.clone();
         let initialization_error = engine.initialize_minds().err().map(safe_error);
+        let last_idle = engine.world.interaction_time;
         let mut simulation = Self {
             engine,
             handle: handle.clone(),
@@ -189,13 +223,15 @@ impl Simulation {
             queued: BTreeMap::new(),
             jobs: HashMap::new(),
             inflight: HashMap::new(),
+            background_inflight: HashSet::new(),
             deferred: VecDeque::new(),
             messages: VecDeque::new(),
             statuses: HashMap::new(),
             room_last: HashMap::new(),
             sequence: 0,
+            context_generation: 0,
             wall: 0.,
-            last_idle: 0.,
+            last_idle,
             observing: false,
             selected: Some(102),
             pending_language: language,
@@ -256,7 +292,8 @@ impl Simulation {
         })
     }
     fn job_current(&self, job: &Job) -> bool {
-        job.branch == self.engine.world.branch
+        job.generation == self.context_generation
+            && job.branch == self.engine.world.branch
             && self
                 .engine
                 .actor(job.actor)
@@ -284,7 +321,7 @@ impl Simulation {
             }
             let id = wake.actor_id;
             if let Some(queued) = self.queued.get_mut(&id) {
-                let new_conversation = wake.priority == WakePriority::Conversation;
+                let new_conversation = wake.cause == WakeCause::External;
                 queued.wake.merge(wake);
                 if new_conversation {
                     queued.attempt = 0;
@@ -313,6 +350,21 @@ impl Simulation {
         for key in stale {
             if let Some(job) = self.jobs.remove(&key) {
                 job.cancel.cancel();
+                self.statuses.entry(key).or_default().cancellations += 1;
+                if !job.listener
+                    && job.branch == self.engine.world.branch
+                    && self.engine.actor(job.actor).is_ok_and(|a| a.awake())
+                    && let Some(mut queued) = job
+                        .queued
+                        .filter(|q| q.wake.priority == WakePriority::Conversation)
+                {
+                    if let Some(current) = self.queued.get_mut(&job.actor) {
+                        queued.wake.merge(current.wake.clone());
+                        current.wake = queued.wake;
+                    } else {
+                        self.queued.insert(job.actor, queued);
+                    }
+                }
             }
         }
         let engine = &self.engine;
@@ -325,6 +377,16 @@ impl Simulation {
             .cloned()
             .collect::<VecDeque<_>>();
         self.messages = valid;
+        for actor in &self.engine.world.actors {
+            if let Some(failure) = &actor.last_plan_failure {
+                let value = json!(failure);
+                let status = self.statuses.entry((actor.id, false)).or_default();
+                if status.seen_failure.as_ref() != Some(&value) {
+                    status.execution_failures += 1;
+                    status.seen_failure = Some(value);
+                }
+            }
+        }
     }
     fn paused(&self) -> Vec<&str> {
         let mut reasons = vec![];
@@ -362,19 +424,24 @@ impl Simulation {
                     continue;
                 }
                 let danger = q.wake.urgent() || self.combat(*id).is_some();
+                if !danger
+                    && self
+                        .engine
+                        .actor(*id)?
+                        .activity
+                        .as_ref()
+                        .is_some_and(|a| !a.intent.long())
+                {
+                    continue;
+                }
                 let conversation = q.wake.priority == WakePriority::Conversation;
                 let foreground = self.foreground(*id);
                 let aged = self.wall - q.created >= self.scheduling.aging;
                 if !foreground
                     && !danger
                     && !conversation
-                    && !aged
-                    && self
-                        .jobs
-                        .values()
-                        .filter(|j| !j.listener && !self.foreground(j.actor))
-                        .count()
-                        >= self.scheduling.maximum_calls.saturating_sub(1)
+                    && self.background_inflight.len()
+                        >= self.scheduling.maximum_calls.saturating_sub(1).max(1)
                 {
                     continue;
                 }
@@ -397,10 +464,11 @@ impl Simulation {
                 ));
             }
             for m in &self.messages {
+                let actor = self.engine.actor(m.actor)?;
                 if self.jobs.contains_key(&(m.actor, true))
                     || self.inflight.values().any(|key| *key == (m.actor, true))
-                    || self.engine.actor(m.actor)?.activity.is_some()
-                    || !self.engine.actor(m.actor)?.plan.is_empty()
+                    || actor.activity.as_ref().is_some_and(|a| !a.intent.long())
+                    || (actor.activity.is_none() && !actor.plan.is_empty())
                 {
                     continue;
                 }
@@ -436,16 +504,29 @@ impl Simulation {
             .map(|values| values.iter().filter_map(Value::as_u64).collect())
             .unwrap_or_default();
         let input = observation.get("input").cloned().unwrap_or(observation);
+        let id = self.next();
+        if !self.foreground(actor)
+            && !q.wake.urgent()
+            && q.wake.priority != WakePriority::Conversation
+            && self.combat(actor).is_none()
+        {
+            self.background_inflight.insert(id);
+        }
         let request = ThinkRequest {
             actor_id: actor,
             branch: self.engine.world.branch.clone(),
             input,
             listener: false,
+            identity: Some(self.engine.npc_identity(actor)?),
+            token: DecisionToken {
+                job_id: id,
+                context_generation: self.context_generation,
+            },
         };
-        let id = self.next();
         let cancel = CancellationToken::new();
         let job = Job {
             id,
+            generation: self.context_generation,
             actor,
             listener: false,
             branch: request.branch.clone(),
@@ -472,23 +553,50 @@ impl Simulation {
     }
     fn launch_listener(&mut self, message: Message) -> Result<()> {
         let actor = message.actor;
-        let mut view = self.player_view(actor)?;
+        let full = self.player_view(actor)?;
+        let mut view = json!({});
+        for field in [
+            "self",
+            "room",
+            "doors",
+            "actors",
+            "items",
+            "inventory",
+            "actions",
+            "combat",
+            "map",
+            "language",
+            "time",
+        ] {
+            if let Some(value) = full.get(field) {
+                view[field] = value.clone();
+            }
+        }
+        if let Some(own) = view["self"].as_object_mut() {
+            own.remove("portraitKey");
+        }
         // Command discovery includes blocked doors; model suggestions stay executable.
         if let Some(actions) = view["actions"].as_array_mut() {
             actions.retain(|action| action["available"].as_bool() != Some(false));
         }
         let mut allowed = HashSet::from([actor]);
         gather_ids(&view, &mut allowed);
+        let id = self.next();
         let request = ThinkRequest {
             actor_id: actor,
             branch: message.branch.clone(),
             listener: true,
+            identity: None,
+            token: DecisionToken {
+                job_id: id,
+                context_generation: self.context_generation,
+            },
             input: json!({"text":message.text,"channel":{"targetId":null,"volume":message.volume},"world":view}),
         };
-        let id = self.next();
         let cancel = CancellationToken::new();
         let job = Job {
             id,
+            generation: self.context_generation,
             actor,
             listener: true,
             branch: message.branch.clone(),
@@ -517,13 +625,23 @@ impl Simulation {
         let driver = self.driver.clone();
         let sender = self.done_sender.clone();
         let timeout = self.scheduling.timeout;
+        let job = &self.jobs[&(request.actor_id, request.listener)];
+        let created = job
+            .queued
+            .as_ref()
+            .map(|q| q.created)
+            .or_else(|| job.message.as_ref().map(|m| m.created))
+            .unwrap_or(self.wall);
+        let queued_ms = (self.wall - created).max(0.) * 1000.;
         tokio::spawn(async move {
+            let started = Instant::now();
             let actor = request.actor_id;
             let listener = request.listener;
+            let generation = request.token.context_generation;
             let mut turn = driver.think(request, cancel.clone());
             let result = tokio::select! {
                 result=&mut turn=>result,
-                _=tokio::time::sleep(timeout)=>{cancel.cancel();let _=tokio::time::timeout(Duration::from_secs(3),&mut turn).await;Err(anyhow::anyhow!("The decision timed out"))},
+                _=tokio::time::sleep(timeout)=>{cancel.cancel();let _=turn.await;Err(anyhow::anyhow!("The decision timed out"))},
             };
             let _ = sender
                 .send(Completion {
@@ -531,9 +649,35 @@ impl Simulation {
                     actor,
                     listener,
                     result,
+                    queued_ms,
+                    duration_ms: started.elapsed().as_secs_f64() * 1000.,
+                    generation,
                 })
                 .await;
         });
+    }
+    fn retire_slot(&mut self, completion: &Completion) {
+        self.inflight.remove(&completion.id);
+        self.background_inflight.remove(&completion.id);
+        if completion.generation != self.context_generation {
+            return;
+        }
+        if let Ok(result) = &completion.result {
+            let timing = Timing {
+                queue_ms: completion.queued_ms,
+                inference_ms: result.latency_ms,
+                cleanup_ms: result.cleanup_ms,
+                total_ms: completion.queued_ms + completion.duration_ms,
+            };
+            self.statuses
+                .entry((completion.actor, completion.listener))
+                .or_default()
+                .timing = Some(timing);
+            self.latencies.push_back((completion.listener, timing));
+            if self.latencies.len() > 200 {
+                self.latencies.pop_front();
+            }
+        }
     }
     fn accept(&mut self, completion: Completion) -> Result<()> {
         let key = (completion.actor, completion.listener);
@@ -554,10 +698,6 @@ impl Simulation {
                 let status = self.statuses.entry(key).or_default();
                 status.tokens += result.tokens;
                 status.latency = Some(result.latency_ms);
-                self.latencies.push_back(result.latency_ms);
-                if self.latencies.len() > 200 {
-                    self.latencies.pop_front();
-                }
                 if job.listener {
                     let parsed = crate::model::Interpretation::parse(result.decision.clone());
                     match parsed {
@@ -614,7 +754,10 @@ impl Simulation {
                 let status = self.statuses.entry(key).or_default();
                 status.error = Some(error.clone());
                 status.state = "failed".into();
-                if let Some(mut q) = job.queued.filter(|q| q.attempt < 1) {
+                status.rejections += 1;
+                if let Some(mut q) = job.queued.filter(|q| q.attempt < 1)
+                    && self.engine.claim_correction(job.actor)?
+                {
                     q.attempt += 1;
                     q.feedback = Some(error);
                     self.queued.insert(job.actor, q);
@@ -627,6 +770,10 @@ impl Simulation {
         self.messages.retain(|m| m.actor != actor);
         if let Some(job) = self.jobs.remove(&(actor, true)) {
             job.cancel.cancel();
+            self.statuses
+                .entry((actor, true))
+                .or_default()
+                .cancellations += 1;
         }
         if let Some(status) = self.statuses.get_mut(&(actor, true)) {
             status.error = None;
@@ -638,6 +785,10 @@ impl Simulation {
     fn cancel_all(&mut self) {
         for (_, job) in self.jobs.drain() {
             job.cancel.cancel();
+            self.statuses
+                .entry((job.actor, job.listener))
+                .or_default()
+                .cancellations += 1;
         }
         self.messages.clear();
         self.queued.clear();
@@ -819,6 +970,7 @@ impl Simulation {
                             visit: self.visit(actor),
                             combat: self.combat(actor),
                             order,
+                            created: self.wall,
                         });
                     } else if !speech {
                         self.cancel_listener(actor);
@@ -839,7 +991,7 @@ impl Simulation {
                 "observe" => &["enabled"],
                 "save" | "load" => &["name"],
                 "select" => &["actorId"],
-                "settings" => &["language", "scenario"],
+                "settings" => &["language", "scenario", "maxAgents", "npcUpdateRate"],
                 "new" => &["seed"],
                 _ => bail!("Unknown manager operation"),
             },
@@ -884,17 +1036,46 @@ impl Simulation {
                     .unwrap_or(&self.pending_scenario)
                     .to_owned();
                 WorldContent::load(&scenario)?;
+                let maximum = match params.get("maxAgents") {
+                    Some(value) => value
+                        .as_u64()
+                        .filter(|n| (1..=32).contains(n))
+                        .ok_or_else(|| anyhow::anyhow!("Maximum agents must be between 1 and 32"))?
+                        as usize,
+                    None => self.scheduling.maximum_calls,
+                };
+                let npc_rate = match params.get("npcUpdateRate") {
+                    Some(value) => value
+                        .as_u64()
+                        .filter(|n| matches!(n, 1 | 5 | 15))
+                        .context("NPC update rate must be 1, 5 or 15")?
+                        as u8,
+                    None => self.scheduling.npc_update_rate,
+                };
                 let path = self.handle.info.data_dir.join("server-settings.json");
-                let mut settings = std::fs::read(&path)
-                    .ok()
-                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-                    .filter(Value::is_object)
-                    .unwrap_or_else(|| json!({}));
+                let mut settings = match std::fs::read(&path) {
+                    Ok(bytes) => {
+                        ensure!(bytes.len() <= 65536, "Server settings are too large");
+                        let value: Value = serde_json::from_slice(&bytes)?;
+                        ensure!(value.is_object(), "Invalid server settings");
+                        value
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => json!({}),
+                    Err(error) => return Err(error.into()),
+                };
                 settings["language"] = json!(language);
                 settings["scenario"] = json!(scenario);
+                settings["maxAgents"] = json!(maximum);
+                settings["npcUpdateRate"] = json!(npc_rate);
                 write_private(&path, &serde_json::to_vec(&settings)?, false)?;
                 self.pending_language = language;
                 self.pending_scenario = scenario;
+                self.scheduling.maximum_calls = maximum;
+                if npc_rate != self.scheduling.npc_update_rate {
+                    self.scheduling.set_npc_update_rate(npc_rate)?;
+                    self.last_idle = self.engine.world.interaction_time;
+                }
+                self.pump()?;
             }
             "load" | "new" => {
                 if method == "load" {
@@ -924,6 +1105,10 @@ impl Simulation {
                 self.replace_context().await?;
             }
             "recover" => {
+                self.context_generation = self
+                    .context_generation
+                    .checked_add(1)
+                    .context("Decision generation exhausted")?;
                 self.cancel_all();
                 self.error = None;
                 self.driver.reset().await;
@@ -946,6 +1131,11 @@ impl Simulation {
         Ok(json!({"ok":true}))
     }
     async fn replace_context(&mut self) -> Result<()> {
+        self.last_idle = self.engine.world.interaction_time;
+        self.context_generation = self
+            .context_generation
+            .checked_add(1)
+            .context("Decision generation exhausted")?;
         self.cancel_all();
         self.driver.reset().await;
         for (_, sender) in std::mem::take(&mut self.connected) {
@@ -966,10 +1156,24 @@ impl Simulation {
         self.engine.set_pause(true)?;
         self.error = None;
         self.statuses.clear();
+        self.latencies.clear();
         self.room_last.clear();
-        self.last_idle = self.wall;
         self.engine.initialize_minds()?;
         Ok(())
+    }
+    fn recall_for_job(&self, request: &RecallRequest) -> Result<Value> {
+        ensure!(
+            request.branch == self.engine.world.branch
+                && request.token.context_generation == self.context_generation
+                && self
+                    .jobs
+                    .get(&(request.actor_id, false))
+                    .is_some_and(|job| job.id == request.token.job_id
+                        && self.job_current(job)
+                        && !job.cancel.is_cancelled()),
+            "This recall belongs to an obsolete decision"
+        );
+        self.engine.recall(request.actor_id, &request.query)
     }
     pub fn player_view(&self, actor: u16) -> Result<Value> {
         let mut view = self.engine.player_view(actor)?;
@@ -990,6 +1194,8 @@ impl Simulation {
         view["error"] = json!(self.error);
         view["pendingLanguage"] = json!(self.pending_language);
         view["pendingScenario"] = json!(self.pending_scenario);
+        view["maxAgents"] = json!(self.scheduling.maximum_calls);
+        view["npcUpdateRate"] = json!(self.scheduling.npc_update_rate);
         view["manualPause"] = json!(self.engine.world.manual_pause);
         view["observing"] = json!(self.observing);
         view["ssh"] = json!({"host":self.handle.info.address,"port":self.handle.info.port,"command":format!("ssh -p {} {}",self.handle.info.port,self.handle.info.address),"localCommand":format!("ssh -p {} 127.0.0.1",self.handle.info.port)});
@@ -1019,23 +1225,50 @@ impl Simulation {
                 } else {
                     "ai"
                 });
-                actor["status"] = json!({"state":state,"reason":status.map(|s|s.reason.as_str()).unwrap_or(""),"calls":status.map_or(0,|s|s.calls),"tokens":status.map_or(0,|s|s.tokens),"elapsedMs":job.map_or(0.,|j|(self.wall-j.started)*1000.),"lastLatencyMs":status.and_then(|s|s.latency),"error":status.and_then(|s|s.error.as_ref())});
+                actor["status"] = json!({"state":state,"reason":status.map(|s|s.reason.as_str()).unwrap_or(""),"calls":status.map_or(0,|s|s.calls),"tokens":status.map_or(0,|s|s.tokens),"elapsedMs":job.map_or(0.,|j|(self.wall-j.started)*1000.),"lastLatencyMs":status.and_then(|s|s.latency),"timing":status.and_then(|s|s.timing),"cancellations":status.map_or(0,|s|s.cancellations),"rejections":status.map_or(0,|s|s.rejections),"executionFailures":status.map_or(0,|s|s.execution_failures),"error":status.and_then(|s|s.error.as_ref())});
             }
         }
-        let mut latencies = self.latencies.iter().copied().collect::<Vec<_>>();
-        latencies.sort_by(f64::total_cmp);
-        let percentile = |p: f64| {
-            if latencies.is_empty() {
-                None
-            } else {
-                Some(latencies[((latencies.len() as f64 * p).ceil() as usize).saturating_sub(1)])
-            }
-        };
-        view["metrics"] = json!({"calls":self.statuses.values().map(|s|s.calls).sum::<u64>(),"tokens":self.statuses.values().map(|s|s.tokens).sum::<u64>(),"active":self.inflight.len(),"p50":percentile(0.5),"p95":percentile(0.95)});
+        view["metrics"] = self.metrics(None);
+        view["metrics"]["npc"] = self.metrics(Some(false));
+        view["metrics"]["listener"] = self.metrics(Some(true));
         let selected = self.selected.unwrap_or(0);
         let status = self.statuses.get(&(selected, true));
         view["listener"] = json!({"enabled":self.enabled(selected),"state":if self.jobs.contains_key(&(selected,true)){"thinking"}else{"idle"},"summary":status.map(|s|s.summary.as_str()).unwrap_or(""),"plan":status.map(|s|s.plan.clone()).unwrap_or(json!([])),"text":status.map(|s|s.reason.as_str()).unwrap_or(""),"error":status.and_then(|s|s.error.as_ref()),"calls":status.map_or(0,|s|s.calls),"tokens":status.map_or(0,|s|s.tokens),"queued":self.messages.iter().filter(|m|m.actor==selected).count()});
         Ok(view)
+    }
+    fn metrics(&self, listener: Option<bool>) -> Value {
+        let statuses = self
+            .statuses
+            .iter()
+            .filter(|((_, kind), _)| listener.is_none_or(|filter| *kind == filter))
+            .map(|(_, status)| status)
+            .collect::<Vec<_>>();
+        let samples = self
+            .latencies
+            .iter()
+            .filter(|(kind, _)| listener.is_none_or(|filter| *kind == filter))
+            .map(|(_, timing)| timing)
+            .collect::<Vec<_>>();
+        let distribution = |select: fn(&Timing) -> f64| {
+            let mut values = samples
+                .iter()
+                .map(|timing| select(timing))
+                .collect::<Vec<_>>();
+            values.sort_by(f64::total_cmp);
+            let percentile = |p: f64| {
+                values
+                    .get(((values.len() as f64 * p).ceil() as usize).saturating_sub(1))
+                    .copied()
+            };
+            json!({"p50":percentile(0.5),"p95":percentile(0.95)})
+        };
+        let inference = distribution(|t| t.inference_ms);
+        json!({"calls":statuses.iter().map(|s| s.calls).sum::<u64>(),"tokens":statuses.iter().map(|s| s.tokens).sum::<u64>(),
+            "active":self.inflight.values().filter(|(_, kind)| listener.is_none_or(|filter| *kind == filter)).count(),
+            "cancellations":statuses.iter().map(|s| s.cancellations).sum::<u64>(),"rejections":statuses.iter().map(|s| s.rejections).sum::<u64>(),
+            "executionFailures":statuses.iter().map(|s| s.execution_failures).sum::<u64>(),"samples":samples.len(),
+            "p50":inference["p50"],"p95":inference["p95"],"queueMs":distribution(|t| t.queue_ms),"inferenceMs":inference,
+            "cleanupMs":distribution(|t| t.cleanup_ms),"totalMs":distribution(|t| t.total_ms)})
     }
     fn publish(&mut self) -> Result<()> {
         let ids = self.connected.keys().copied().collect::<Vec<_>>();
@@ -1058,8 +1291,11 @@ impl Simulation {
         if self.can_run() {
             self.engine.advance(elapsed)?;
         }
-        if self.can_run() && self.wall - self.last_idle >= self.scheduling.background_interval {
-            self.last_idle = self.wall;
+        if self.can_run()
+            && self.engine.world.interaction_time - self.last_idle
+                >= self.scheduling.background_interval
+        {
+            self.last_idle = self.engine.world.interaction_time;
             let idle: Vec<_> = self
                 .engine
                 .world
@@ -1100,8 +1336,8 @@ impl Simulation {
                     }
                     if let Err(error)=self.pump(){self.error=Some(safe_error(error));self.engine.set_pause(true)?;}self.publish()?;
                 }
-                Some(request)=self.recall_requests.recv()=>{let valid=request.branch==self.engine.world.branch && self.jobs.contains_key(&(request.actor_id,false));let answer=if valid{self.engine.recall(request.actor_id,&request.query)}else{Err(anyhow::anyhow!("This recall belongs to an obsolete decision"))};let _=request.reply.send(answer);},
-                Some(completion)=self.done.recv()=>{self.inflight.remove(&completion.id);if self.can_run(){if let Err(error)=self.accept(completion){self.error=Some(safe_error(error));self.engine.set_pause(true)?;}}else if self.jobs.get(&(completion.actor,completion.listener)).is_some_and(|job|job.id==completion.id){self.deferred.push_back(completion);}self.pump()?;self.publish()?;},
+                Some(request)=self.recall_requests.recv()=>{let answer=self.recall_for_job(&request);let _=request.reply.send(answer);},
+                Some(completion)=self.done.recv()=>{self.retire_slot(&completion);if self.can_run(){if let Err(error)=self.accept(completion){self.error=Some(safe_error(error));self.engine.set_pause(true)?;}}else if self.jobs.get(&(completion.actor,completion.listener)).is_some_and(|job|job.id==completion.id){self.deferred.push_back(completion);}self.pump()?;self.publish()?;},
             }
         }
         self.cancel_all();
@@ -1214,6 +1450,7 @@ mod tests {
             decision: json!({"summary":"A controlled intention.","goals":[],"plan":plan,"memories":[],"relationships":[],"acceptPlots":[]}),
             tokens: 10,
             latency_ms: 100.,
+            cleanup_ms: 0.,
             recalled: vec![],
         }
     }
@@ -1222,7 +1459,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        sim.inflight.remove(&completion.id);
+        sim.retire_slot(&completion);
         sim.accept(completion).unwrap();
     }
     async fn started(requests: &mut mpsc::UnboundedReceiver<ControlledTurn>) -> ControlledTurn {
@@ -1249,6 +1486,7 @@ mod tests {
                     } else {
                         WakePriority::Routine
                     },
+                    cause: WakeCause::External,
                 },
                 order,
                 created,
@@ -1597,6 +1835,7 @@ mod tests {
                         decision: json!({"summary":"A question with no physical action.","plan":[]}),
                         tokens: 10,
                         latency_ms: 100.,
+                        cleanup_ms: 0.,
                         recalled: vec![],
                     })).unwrap();
                 } else {
@@ -1938,6 +2177,7 @@ mod tests {
                 decision: json!({"summary":"No physical request.","plan":[]}),
                 tokens: 10,
                 latency_ms: 100.,
+                cleanup_ms: 0.,
                 recalled: vec![],
             }))
             .unwrap();
@@ -1985,6 +2225,90 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn listener_can_replace_long_duties_but_waits_for_short_physical_actions() {
+        for first in [
+            json!({"kind":"rest","seconds":1000}),
+            json!({"kind":"guard","seconds":700}),
+            json!({"kind":"take","itemId":1023}),
+        ] {
+            for queued in [false, true] {
+                let (mut sim, mut requests, _directory) = fixture();
+                sim.scheduling.maximum_calls = 1;
+                let player = sim.join(None, "Fixture Guest".into()).unwrap();
+                let id = player.actor_id;
+                assert_eq!(
+                    sim.engine
+                        .dispatch(id, first.clone(), vec![], None)
+                        .unwrap()["ok"],
+                    true
+                );
+                if queued {
+                    sim.engine.actor_mut(id).unwrap().plan =
+                        vec![crate::model::Intent::Wait { seconds: 20 }];
+                }
+                sim.player_request(id, "listener", json!({"enabled":true}))
+                    .unwrap();
+                sim.player_request(
+                    id,
+                    "input",
+                    json!({"text":"I stop what I'm doing and wait by the wall."}),
+                )
+                .unwrap();
+                sim.collect();
+                sim.queued.clear();
+                sim.pump().unwrap();
+                if first["kind"] == "take" {
+                    assert!(requests.try_recv().is_err());
+                    assert_eq!(sim.messages.len(), 1);
+                    let ends = sim
+                        .engine
+                        .actor(id)
+                        .unwrap()
+                        .activity
+                        .as_ref()
+                        .unwrap()
+                        .interaction_ends
+                        .unwrap();
+                    sim.engine
+                        .advance(ends - sim.engine.world.interaction_time)
+                        .unwrap();
+                    assert_eq!(
+                        sim.engine
+                            .world
+                            .items
+                            .iter()
+                            .find(|i| i.id == 1023)
+                            .unwrap()
+                            .owner_id,
+                        Some(id)
+                    );
+                    sim.pump().unwrap();
+                }
+                let (request, reply) = started(&mut requests).await;
+                assert_eq!(request.actor_id, id);
+                assert!(request.listener);
+                reply.send(Ok(ThinkResult {
+                    decision: json!({"summary":"Wait by the wall.","plan":[{"kind":"wait","seconds":90}]}),
+                    tokens: 1, latency_ms: 1., cleanup_ms: 0., recalled: vec![],
+                })).unwrap();
+                finish(&mut sim).await;
+                assert!(matches!(
+                    sim.engine
+                        .actor(id)
+                        .unwrap()
+                        .activity
+                        .as_ref()
+                        .unwrap()
+                        .intent,
+                    crate::model::Intent::Wait { seconds: 90 }
+                ));
+                assert!(sim.engine.actor(id).unwrap().plan.is_empty());
+                sim.cancel_all();
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn stale_listener_results_cannot_act_after_a_room_change() {
         let (mut sim, mut requests, _) = fixture();
         let player = sim.join(None, "Fixture Guest".into()).unwrap();
@@ -2003,6 +2327,7 @@ mod tests {
                 decision: json!({"summary":"Wait.","plan":[{"kind":"wait","seconds":600}]}),
                 tokens: 1,
                 latency_ms: 1.,
+                cleanup_ms: 0.,
                 recalled: vec![],
             }))
             .unwrap();
@@ -2035,5 +2360,349 @@ mod tests {
                 .is_err()
         );
         assert_eq!(sim.engine.language, "en");
+    }
+
+    #[tokio::test]
+    async fn agent_limit_is_validated_atomically_and_survives_restore() {
+        let (mut sim, _, directory) = fixture();
+        let path = directory.path().join("server-settings.json");
+        for invalid in [json!(0), json!(33), json!(2.5), json!("5"), Value::Null] {
+            let before = std::fs::read(&path).ok();
+            let maximum = sim.scheduling.maximum_calls;
+            assert!(
+                sim.manager_request("settings", json!({"language":"pl","maxAgents":invalid}))
+                    .await
+                    .is_err()
+            );
+            assert_eq!(std::fs::read(&path).ok(), before);
+            assert_eq!(sim.scheduling.maximum_calls, maximum);
+            assert_eq!(sim.pending_language, "en");
+        }
+        for limit in [1, 7, 32] {
+            sim.manager_request("settings", json!({"maxAgents":limit}))
+                .await
+                .unwrap();
+            assert_eq!(sim.manager_view().unwrap()["maxAgents"], limit);
+            assert_eq!(
+                serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap()["maxAgents"],
+                limit
+            );
+            sim.engine.save("limit").unwrap();
+            sim.manager_request("load", json!({"name":"limit"}))
+                .await
+                .unwrap();
+            assert_eq!(sim.scheduling.maximum_calls, limit as usize);
+        }
+    }
+
+    #[tokio::test]
+    async fn lowering_capacity_preserves_inflight_and_raising_starts_waiting_work() {
+        let (mut sim, mut requests, _directory) = fixture();
+        sim.join(None, "Fixture Guest".into()).unwrap();
+        sim.queued.clear();
+        sim.scheduling.maximum_calls = 2;
+        for id in [102, 103, 104] {
+            sim.engine.actor_mut(id).unwrap().room_id = 1;
+            wake(&mut sim, id, 0.0, false);
+        }
+        sim.pump().unwrap();
+        let first = started(&mut requests).await;
+        let second = started(&mut requests).await;
+        sim.manager_request("settings", json!({"maxAgents":1}))
+            .await
+            .unwrap();
+        assert_eq!(sim.inflight.len(), 2);
+        assert!(requests.try_recv().is_err());
+        first
+            .1
+            .send(Ok(decision(json!([{"kind":"guard","seconds":600}]))))
+            .unwrap();
+        finish(&mut sim).await;
+        sim.pump().unwrap();
+        assert_eq!(sim.inflight.len(), 1);
+        assert!(requests.try_recv().is_err());
+        sim.manager_request("settings", json!({"maxAgents":3}))
+            .await
+            .unwrap();
+        let next = started(&mut requests).await;
+        assert_ne!(next.0.actor_id, second.0.actor_id);
+        assert_eq!(sim.inflight.len(), 2);
+        sim.cancel_all();
+    }
+
+    #[tokio::test]
+    async fn recall_requires_the_exact_current_job_and_generation_even_on_the_same_branch() {
+        let (mut sim, mut requests, _directory) = fixture();
+        sim.scheduling.maximum_calls = 1;
+        sim.join(None, "Fixture Guest".into()).unwrap();
+        only(&mut sim, &[102]);
+        sim.pump().unwrap();
+        let (current, _reply) = started(&mut requests).await;
+        let make = |actor, token| {
+            let (reply, _) = oneshot::channel();
+            RecallRequest {
+                actor_id: actor,
+                branch: current.branch.clone(),
+                token,
+                query: "daughter".into(),
+                reply,
+            }
+        };
+        assert!(sim.recall_for_job(&make(102, current.token)).is_ok());
+        assert!(sim.recall_for_job(&make(103, current.token)).is_err());
+        assert!(
+            sim.recall_for_job(&make(
+                102,
+                DecisionToken {
+                    job_id: current.token.job_id + 1,
+                    ..current.token
+                }
+            ))
+            .is_err()
+        );
+        sim.manager_request("recover", json!({})).await.unwrap();
+        assert_eq!(sim.engine.world.branch, current.branch);
+        assert!(sim.recall_for_job(&make(102, current.token)).is_err());
+        sim.cancel_all();
+    }
+    #[tokio::test]
+    async fn one_slot_still_allows_background_progress_when_nobody_is_waiting_in_foreground() {
+        let (mut sim, mut requests, _directory) = fixture();
+        sim.scheduling.maximum_calls = 1;
+        sim.join(None, "Fixture Guest".into()).unwrap();
+        sim.collect();
+        sim.queued.clear();
+        wake(&mut sim, 109, 0.0, false);
+        sim.pump().unwrap();
+        let (request, _reply) = started(&mut requests).await;
+        assert_eq!(request.actor_id, 109);
+        assert_eq!(sim.inflight.len(), 1);
+        sim.cancel_all();
+    }
+    #[tokio::test]
+    async fn quiet_and_speech_only_idle_decisions_do_not_call_again_without_a_new_event() {
+        for plan in [
+            json!([]),
+            json!([{"kind":"speak","text":"I heard you.","targetId":null,"volume":"normal","plot":null}]),
+            json!([{"kind":"inspect","targetId":102}]),
+        ] {
+            let (mut sim, mut requests, _directory) = fixture();
+            sim.scheduling.maximum_calls = 1;
+            sim.join(None, "Fixture Guest".into()).unwrap();
+            only(&mut sim, &[102]);
+            sim.pump().unwrap();
+            let (_, reply) = started(&mut requests).await;
+            reply.send(Ok(decision(plan))).unwrap();
+            finish(&mut sim).await;
+            sim.pump().unwrap();
+            assert!(requests.try_recv().is_err());
+            assert!(!sim.queued.contains_key(&102));
+            assert_eq!(sim.statuses[&(102, false)].calls, 1);
+            sim.cancel_all();
+        }
+    }
+
+    #[tokio::test]
+    async fn later_plan_failure_has_private_feedback_and_only_one_immediate_correction() {
+        let (mut sim, mut requests, _directory) = fixture();
+        sim.scheduling.maximum_calls = 1;
+        let player = sim.join(None, "Fixture Guest".into()).unwrap();
+        only(&mut sim, &[102]);
+        sim.pump().unwrap();
+        let (_, reply) = started(&mut requests).await;
+        let failed_plan = json!([{"kind":"speak","text":"I will cook.","targetId":null,"volume":"normal","plot":null},{"kind":"work","recipe":"meal"}]);
+        reply.send(Ok(decision(failed_plan.clone()))).unwrap();
+        finish(&mut sim).await;
+        sim.pump().unwrap();
+        let (correction, reply) = started(&mut requests).await;
+        assert_eq!(
+            correction.input["self"]["lastPlanFailure"]["intent"],
+            json!({"kind":"work","recipe":"meal"})
+        );
+        assert_eq!(correction.input["self"]["lastPlanFailure"]["ok"], false);
+        reply.send(Ok(decision(failed_plan))).unwrap();
+        finish(&mut sim).await;
+        sim.pump().unwrap();
+        assert!(requests.try_recv().is_err());
+        assert_eq!(sim.statuses[&(102, false)].calls, 2);
+        sim.player_request(
+            player.actor_id,
+            "input",
+            json!({"text":"Then leave the meal. Who commands this watch?"}),
+        )
+        .unwrap();
+        sim.pump().unwrap();
+        assert_eq!(started(&mut requests).await.0.actor_id, 102);
+        sim.cancel_all();
+    }
+
+    #[tokio::test]
+    async fn conversation_waits_for_short_physical_completion_and_preserves_every_heard_message() {
+        for duration in [0.4, 1.3] {
+            let (mut sim, mut requests, _directory) = fixture();
+            sim.scheduling.maximum_calls = 1;
+            sim.engine.tuning.action_seconds = duration;
+            let player = sim.join(None, "Fixture Guest".into()).unwrap();
+            sim.queued.clear();
+            assert_eq!(
+                sim.engine
+                    .dispatch(102, json!({"kind":"take","itemId":1023}), vec![], None)
+                    .unwrap()["ok"],
+                true
+            );
+            for text in ["Who commands you?", "Can I talk to him?"] {
+                sim.player_request(player.actor_id, "input", json!({"text":text}))
+                    .unwrap();
+            }
+            sim.pump().unwrap();
+            assert!(requests.try_recv().is_err());
+            assert!(sim.queued.contains_key(&102));
+            assert!(sim.inflight.is_empty());
+            sim.engine.advance(duration).unwrap();
+            sim.pump().unwrap();
+            let (request, _reply) = started(&mut requests).await;
+            assert_eq!(request.actor_id, 102);
+            assert_eq!(
+                request.input["self"]["lastActionOutcome"]["intent"],
+                json!({"kind":"take","itemId":1023})
+            );
+            let heard = request.input["recentDialogue"].to_string();
+            assert!(heard.contains("Who commands you?"));
+            assert!(heard.contains("Can I talk to him?"));
+            assert_eq!(
+                request.input["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|item| item["id"] == 1023)
+                    .unwrap()["ownerId"],
+                102
+            );
+            sim.cancel_all();
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_background_work_and_aging_cannot_consume_the_reserved_reaction_slot() {
+        let (mut sim, mut requests, _directory) = fixture();
+        sim.scheduling.maximum_calls = 3;
+        sim.join(None, "Fixture Guest".into()).unwrap();
+        sim.collect();
+        sim.queued.clear();
+        let created = -sim.scheduling.aging - 1.;
+        for actor in [106, 109, 103] {
+            wake(&mut sim, actor, created, false);
+        }
+        sim.pump().unwrap();
+        let (first, _reply) = started(&mut requests).await;
+        let (_second, _reply) = started(&mut requests).await;
+        assert!(requests.try_recv().is_err());
+        assert_eq!(sim.inflight.len(), 2);
+        assert_eq!(sim.background_inflight.len(), 2);
+        sim.engine
+            .actor_mut(first.actor_id)
+            .unwrap()
+            .decision_version += 1;
+        sim.collect();
+        sim.pump().unwrap();
+        assert!(!sim.jobs.contains_key(&(first.actor_id, false)));
+        assert_eq!(sim.background_inflight.len(), 2);
+        assert!(requests.try_recv().is_err());
+        wake(&mut sim, 102, 0., true);
+        sim.pump().unwrap();
+        assert_eq!(started(&mut requests).await.0.actor_id, 102);
+        assert_eq!(sim.inflight.len(), 3);
+        finish(&mut sim).await;
+        sim.pump().unwrap();
+        assert_eq!(started(&mut requests).await.0.actor_id, 103);
+        assert_eq!(sim.inflight.len(), 3);
+        sim.cancel_all();
+    }
+
+    #[tokio::test]
+    async fn passive_thinking_uses_active_time_and_rate_changes_do_not_change_bodies_or_calendar() {
+        for rate in [1, 5, 15] {
+            let (mut sim, mut requests, _directory) = fixture();
+            sim.scheduling.maximum_calls = 1;
+            sim.scheduling.set_npc_update_rate(rate).unwrap();
+            let player = sim.join(None, "Fixture Guest".into()).unwrap();
+            sim.collect();
+            sim.queued.clear();
+            for actor in &mut sim.engine.world.actors {
+                actor.hunger = 10.;
+                actor.thirst = 10.;
+                actor.fatigue = 10.;
+                if actor.id != 102 && actor.id != player.actor_id {
+                    actor.flags |= crate::model::UNCONSCIOUS;
+                }
+            }
+            let interval = sim.scheduling.background_interval;
+            let start = sim.engine.world.time;
+            sim.tick(interval / 2.).unwrap();
+            assert!(requests.try_recv().is_err());
+            assert!(sim.inflight.is_empty());
+            sim.engine.set_pause(true).unwrap();
+            let bodies = json!(sim.engine.world.actors);
+            sim.tick(1000.).unwrap();
+            assert_eq!(json!(sim.engine.world.actors), bodies);
+            assert_eq!(sim.engine.world.time, start + interval / 2. * 24.);
+            sim.engine.set_pause(false).unwrap();
+            sim.tick(interval / 2. - 0.01).unwrap();
+            assert!(requests.try_recv().is_err());
+            assert!(sim.inflight.is_empty());
+            sim.tick(0.02).unwrap();
+            assert_eq!(started(&mut requests).await.0.actor_id, 102);
+            assert!((sim.engine.world.time - (start + (interval + 0.01) * 24.)).abs() < 1e-8);
+            let before = json!(sim.engine.world.actors);
+            sim.manager_request(
+                "settings",
+                json!({"npcUpdateRate": if rate == 1 { 15 } else { 1 }}),
+            )
+            .await
+            .unwrap();
+            assert_eq!(json!(sim.engine.world.actors), before);
+            sim.cancel_all();
+        }
+    }
+
+    #[tokio::test]
+    async fn npc_rate_settings_are_atomic_persistent_and_survive_save_restore() {
+        let (mut sim, _requests, directory) = fixture();
+        let path = directory.path().join("server-settings.json");
+        write_private(&path, b"{\"port\":2237,\"maxAgents\":7}", false).unwrap();
+        for invalid in [
+            json!(0),
+            json!(2),
+            json!(16),
+            json!(5.5),
+            json!("5"),
+            Value::Null,
+        ] {
+            let before = std::fs::read(&path).unwrap();
+            assert!(
+                sim.manager_request("settings", json!({"language":"pl","npcUpdateRate":invalid}))
+                    .await
+                    .is_err()
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            assert_eq!(sim.pending_language, "en");
+        }
+        for rate in [1, 5, 15] {
+            sim.manager_request("settings", json!({"npcUpdateRate":rate}))
+                .await
+                .unwrap();
+            let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(saved["port"], 2237);
+            assert_eq!(saved["npcUpdateRate"], rate);
+            assert_eq!(sim.manager_view().unwrap()["npcUpdateRate"], rate);
+            sim.engine.save("rate").unwrap();
+            sim.engine.set_pause(true).unwrap();
+            sim.tick(1200.).unwrap();
+            sim.manager_request("load", json!({"name":"rate"}))
+                .await
+                .unwrap();
+            assert_eq!(sim.scheduling.npc_update_rate, rate as u8);
+            assert_eq!(sim.last_idle, sim.engine.world.interaction_time);
+        }
     }
 }
