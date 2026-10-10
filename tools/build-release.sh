@@ -43,11 +43,22 @@ mkdir -p "$release_stage/helper-source" "$release_stage/project" "$release_stage
 cp -a "$release_source_dir/." "$release_stage/helper-source/"
 chmod -R u+w "$release_stage/helper-source"
 cp LICENSE NOTICES.md Cargo.toml Cargo.lock rust-toolchain.toml README.md AGENTS.md flake.nix flake.lock build.rs .gitignore "$release_stage/project/"
-cp -a src content docs examples tools licenses .github "$release_stage/project/"
+cp -a src content docs examples tools licenses tests .github "$release_stage/project/"
 cp licenses/* "$release_stage/licenses/"
-nix develop "$release_flake#default" --command cargo vendor --locked --quiet "$release_stage/cargo-vendor" > "$release_stage/cargo-vendor-config.toml"
+if ! nix develop "$release_flake#default" --command cargo vendor --locked "$release_stage/cargo-vendor" \
+    > "$release_stage/cargo-vendor-config.toml" 2> "$release_stage/vendor.log"; then
+  cat "$release_stage/vendor.log" >&2
+  exit 1
+fi
+rm -- "$release_stage/vendor.log"
 mkdir -p "$release_stage/project/.cargo"
 sed 's|^directory = ".*"$|directory = "../cargo-vendor"|' "$release_stage/cargo-vendor-config.toml" > "$release_stage/project/.cargo/config.toml"
+rm -- "$release_stage/cargo-vendor-config.toml"
+# Exercise the archived configuration with no global registry or cached crates.
+mkdir "$release_stage/cargo-home"
+(cd "$release_stage/project" && CARGO_HOME="$release_stage/cargo-home" \
+  nix develop "$release_flake#default" --command cargo metadata --offline --locked --format-version 1 > /dev/null)
+rm -r -- "$release_stage/cargo-home"
 # GNU tar normalizes ownership/time for reproducible source bundles.
 tar --sort=name --mtime='UTC 2026-01-01' --owner=0 --group=0 --numeric-owner -cJf \
   "dist/$release_name-sources.tar.xz" -C "$release_stage" .

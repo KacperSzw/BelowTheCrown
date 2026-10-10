@@ -6,7 +6,12 @@ use crate::{
 };
 use anyhow::{Context, Result, anyhow, ensure};
 use ipnet::Ipv4Net;
-use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, layout::Rect};
+use ratatui::{
+    Terminal, TerminalOptions, Viewport,
+    backend::{Backend, ClearType, CrosstermBackend, WindowSize},
+    buffer::Cell,
+    layout::{Position, Rect, Size},
+};
 use russh::{
     Channel, ChannelId, ChannelWriteHalf, Disconnect, Pty,
     keys::{self, HashAlg, PrivateKey, PublicKey},
@@ -650,6 +655,94 @@ impl FrameBytes {
         Ok(std::mem::take(&mut *bytes))
     }
 }
+
+/// ANSI output belongs to this SSH PTY. Geometry and cursor queries must never
+/// reach the host console, which may be absent or used by the manager.
+struct RemoteBackend {
+    ansi: CrosstermBackend<FrameBytes>,
+    size: Size,
+    cursor: Position,
+}
+impl RemoteBackend {
+    fn new(bytes: FrameBytes, width: u16, height: u16) -> Self {
+        Self {
+            ansi: CrosstermBackend::new(bytes),
+            size: Size::new(width, height),
+            cursor: Position::ORIGIN,
+        }
+    }
+    fn resize(&mut self, width: u16, height: u16) {
+        self.size = Size::new(width, height);
+        self.cursor.x = self.cursor.x.min(width.saturating_sub(1));
+        self.cursor.y = self.cursor.y.min(height.saturating_sub(1));
+    }
+}
+impl Backend for RemoteBackend {
+    type Error = std::io::Error;
+
+    fn draw<'a, I>(&mut self, content: I) -> std::io::Result<()>
+    where
+        I: Iterator<Item = (u16, u16, &'a Cell)>,
+    {
+        let cursor = &mut self.cursor;
+        let size = self.size;
+        self.ansi.draw(content.inspect(|(x, y, cell)| {
+            let width = unicode_width::UnicodeWidthStr::width(cell.symbol());
+            *cursor = Position::new(
+                x.saturating_add(width.min(u16::MAX as usize) as u16)
+                    .min(size.width.saturating_sub(1)),
+                (*y).min(size.height.saturating_sub(1)),
+            );
+        }))
+    }
+    fn append_lines(&mut self, n: u16) -> std::io::Result<()> {
+        self.ansi.append_lines(n)?;
+        self.cursor = Position::new(
+            0,
+            self.cursor
+                .y
+                .saturating_add(n)
+                .min(self.size.height.saturating_sub(1)),
+        );
+        Ok(())
+    }
+    fn hide_cursor(&mut self) -> std::io::Result<()> {
+        self.ansi.hide_cursor()
+    }
+    fn show_cursor(&mut self) -> std::io::Result<()> {
+        self.ansi.show_cursor()
+    }
+    fn get_cursor_position(&mut self) -> std::io::Result<Position> {
+        Ok(self.cursor)
+    }
+    fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> std::io::Result<()> {
+        let position = position.into();
+        self.cursor = Position::new(
+            position.x.min(self.size.width.saturating_sub(1)),
+            position.y.min(self.size.height.saturating_sub(1)),
+        );
+        self.ansi.set_cursor_position(self.cursor)
+    }
+    fn clear(&mut self) -> std::io::Result<()> {
+        self.ansi.clear()
+    }
+    fn clear_region(&mut self, clear_type: ClearType) -> std::io::Result<()> {
+        self.ansi.clear_region(clear_type)
+    }
+    fn size(&self) -> std::io::Result<Size> {
+        Ok(self.size)
+    }
+    fn window_size(&mut self) -> std::io::Result<WindowSize> {
+        Ok(WindowSize {
+            columns_rows: self.size,
+            pixels: Size::ZERO,
+        })
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Backend::flush(&mut self.ansi)
+    }
+}
+
 struct PlayerGuard {
     actor: u16,
     session: u64,
@@ -708,7 +801,7 @@ async fn terminal(
         .ok_or_else(|| anyhow!("The game needs a PTY."))?;
     let bytes = FrameBytes::default();
     let mut terminal = Terminal::with_options(
-        CrosstermBackend::new(bytes.clone()),
+        RemoteBackend::new(bytes.clone(), info.width, info.height),
         TerminalOptions {
             viewport: Viewport::Fixed(Rect::new(0, 0, info.width, info.height)),
         },
@@ -736,7 +829,7 @@ async fn terminal(
             _=token.cancelled()=>break,
             changed=size.changed()=>{
                 if changed.is_err(){break;}
-                if let Some(info)=size.borrow_and_update().clone(){terminal.resize(Rect::new(0,0,info.width,info.height))?;ui.utf8=supports_braille(&info.term,info.locale.as_deref());dirty=true;}
+                if let Some(info)=size.borrow_and_update().clone(){terminal.backend_mut().resize(info.width,info.height);terminal.resize(Rect::new(0,0,info.width,info.height))?;ui.utf8=supports_braille(&info.term,info.locale.as_deref());dirty=true;}
             }
             changed=async{match player.as_mut(){Some(player)=>player.views.changed().await,None=>std::future::pending().await}}=>{
                 if changed.is_err(){break;}
@@ -835,5 +928,68 @@ async fn terminal(
         Err(error)
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_geometry_cursor_and_resize_are_owned_by_each_pty() {
+        let bytes = FrameBytes::default();
+        let backend = RemoteBackend::new(bytes.clone(), 100, 32);
+        let mut terminal = Terminal::with_options(
+            backend,
+            TerminalOptions {
+                viewport: Viewport::Fixed(Rect::new(0, 0, 100, 32)),
+            },
+        )
+        .unwrap();
+        let other = RemoteBackend::new(FrameBytes::default(), 60, 18);
+        terminal.set_cursor_position((80, 24)).unwrap();
+        assert_eq!(
+            terminal.get_cursor_position().unwrap(),
+            Position::new(80, 24)
+        );
+        for (width, height) in [(40, 14), (120, 36), (20, 8), (80, 24)] {
+            terminal.backend_mut().resize(width, height);
+            terminal.resize(Rect::new(0, 0, width, height)).unwrap();
+            assert_eq!(terminal.size().unwrap(), Size::new(width, height));
+            assert_eq!(
+                terminal.backend_mut().window_size().unwrap().columns_rows,
+                Size::new(width, height)
+            );
+            assert_eq!(other.size().unwrap(), Size::new(60, 18));
+            terminal
+                .draw(|frame| {
+                    frame.render_widget(
+                        ratatui::widgets::Paragraph::new("Żaba 🕯️")
+                            .style(ratatui::style::Style::default().fg(ui::PALE)),
+                        frame.area(),
+                    );
+                    frame.set_cursor_position((width - 1, height - 1));
+                })
+                .unwrap();
+            assert_eq!(
+                terminal.get_cursor_position().unwrap(),
+                Position::new(width - 1, height - 1)
+            );
+            terminal.clear().unwrap();
+            assert_eq!(
+                terminal.get_cursor_position().unwrap(),
+                Position::new(width - 1, height - 1)
+            );
+        }
+        let output = bytes.take().unwrap();
+        assert!(
+            !output.windows(4).any(|part| part == b"\x1b[6n"),
+            "Remote rendering emitted a host cursor query"
+        );
+        let plain = ui::clean(&String::from_utf8(output).unwrap(), false);
+        assert!(
+            plain.contains("Żaba 🕯️"),
+            "Missing rendered Unicode: {plain:?}"
+        );
     }
 }

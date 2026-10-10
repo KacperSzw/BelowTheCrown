@@ -812,3 +812,26 @@ async fn ssh_private_files_refuse_symlinks_without_touching_the_target() {
         assert!(!target.path().join("known_hosts").exists());
     }
 }
+
+#[test]
+fn headless_host_resizes_remote_sessions_without_terminal_environment() {
+    // A separate process avoids changing environment variables while other tests
+    // run. Reuse the complete multi-client scenario, keeping all its assertions.
+    let result = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "guest_terminals_chat_resize_and_disconnect_independently",
+            "--nocapture",
+        ])
+        .env_remove("TERM")
+        .env_remove("COLORTERM")
+        .env("RUST_BACKTRACE", "1")
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "Headless resize failed:\n{}\n{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
