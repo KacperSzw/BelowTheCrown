@@ -374,10 +374,14 @@ pub async fn setup(mut settings: Setup) -> Result<Setup> {
     loop {
         terminal.draw(|frame| {
             let width = frame.area().width;
-            let title = ui::ascii_title(usize::from(width));
-            let top = title.len() as u16;
+            let title = ui::title(
+                usize::from(width),
+                usize::from(frame.area().height.saturating_sub(9)),
+                ui::local_braille_support(),
+            );
+            let top = (title.len() + usize::from(!title.is_empty())) as u16;
             let areas = Layout::vertical([
-                Constraint::Length(top + 1),
+                Constraint::Length(top),
                 Constraint::Min(1),
                 Constraint::Length(2),
             ])
@@ -554,7 +558,11 @@ impl ManagerUi {
     }
     pub fn render(&self, frame: &mut Frame) {
         let area = frame.area();
-        let title = ui::ascii_title(usize::from(area.width));
+        let title = ui::title(
+            usize::from(area.width),
+            usize::from(area.height.saturating_sub(10)),
+            ui::local_braille_support(),
+        );
         let top = title.len() as u16 + 3;
         let areas = Layout::vertical([
             Constraint::Length(top),

@@ -713,13 +713,32 @@ impl WorldEvent {
         Some(result)
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum WakePriority {
+    Routine,
+    Conversation,
+    Danger,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Wake {
     pub actor_id: u16,
     pub reason: String,
-    pub urgent: bool,
+    pub priority: WakePriority,
     pub version: u64,
+}
+impl Wake {
+    pub fn urgent(&self) -> bool {
+        self.priority == WakePriority::Danger
+    }
+    pub fn merge(&mut self, newer: Self) {
+        self.version = newer.version;
+        if newer.priority >= self.priority {
+            self.reason = newer.reason;
+            self.priority = newer.priority;
+        }
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

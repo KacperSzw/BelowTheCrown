@@ -636,6 +636,32 @@ impl Store {
         values.reverse();
         Ok(values)
     }
+    /// Keep others' words available even when this actor has spoken repeatedly.
+    pub fn recent_dialogue(
+        &self,
+        actor: u16,
+        other_limit: usize,
+        own_limit: usize,
+    ) -> Result<Vec<Memory>> {
+        let mut stmt = self.db.prepare(
+            "WITH speech AS (
+                SELECT id, data, json_extract(data,'$.sourceId') AS speaker
+                FROM memories WHERE actor_id=?1 AND json_extract(data,'$.kind')='heard'
+            ), others AS (
+                SELECT id, data FROM speech WHERE speaker IS NULL OR speaker != ?1 ORDER BY id DESC LIMIT ?2
+            ), own AS (
+                SELECT id, data FROM speech WHERE speaker = ?1 ORDER BY id DESC LIMIT ?3
+            )
+            SELECT data FROM (SELECT * FROM others UNION ALL SELECT * FROM own) ORDER BY id",
+        )?;
+        let mut values = Vec::new();
+        for row in stmt.query_map(params![actor, other_limit as i64, own_limit as i64], |r| {
+            r.get::<_, String>(0)
+        })? {
+            values.push(serde_json::from_str(&row?)?);
+        }
+        Ok(values)
+    }
     pub fn recall(&self, actor: u16, query: &str, limit: usize) -> Result<Vec<Memory>> {
         // Unicode-aware matching happens after the indexed actor filter; no query can cross minds.
         let words: Vec<_> = query

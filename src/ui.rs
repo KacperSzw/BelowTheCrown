@@ -248,6 +248,16 @@ pub struct Submission {
 pub struct Suggestion {
     pub command: String,
     pub description: String,
+    pub status: String,
+}
+
+fn door_color(status: &str) -> Color {
+    match status {
+        "open" | "ready" => SAGE,
+        "closed" | "close_first" => AMBER,
+        "locked" | "needs_key" | "blocked" => BLOOD,
+        _ => ASH,
+    }
 }
 
 pub fn normalized(text: &str) -> String {
@@ -330,7 +340,7 @@ pub fn parse_input(input: &str, view: &Value) -> Result<Operation> {
     }
     for action in list(view, "actions") {
         if normalized(field(action, "command")) == normalized(text) {
-            let mut params = json!({"intent":action["intent"]});
+            let mut params = json!({"intent":action["intent"],"context":context(view)});
             if matches!(
                 field(&action["intent"], "kind"),
                 "attack" | "defend" | "guard" | "flee" | "move"
@@ -438,11 +448,13 @@ pub fn suggestions(input: &str, view: &Value) -> Vec<Suggestion> {
     .map(|(command, description)| Suggestion {
         command: command.into(),
         description: translated(view, description),
+        status: String::new(),
     })
     .collect::<Vec<_>>();
     for action in list(view, "actions") {
         choices.push(Suggestion {
             command: field(action, "command").into(),
+            status: field(action, "status").into(),
             description: field(action, "hint").to_owned().chars().next().map_or_else(
                 || field(action, "label").into(),
                 |_| field(action, "hint").into(),
@@ -932,23 +944,21 @@ impl PlayerUi {
                     );
                 }
                 for door in list(&view, "doors") {
+                    let status = if door["locked"].as_bool().unwrap_or(false) {
+                        "locked"
+                    } else if door["open"].as_bool().unwrap_or(false) {
+                        "open"
+                    } else {
+                        "closed"
+                    };
                     self.write(
                         &format!(
                             "{} → {} · {}",
                             field(door, "name"),
                             field(door, "destination"),
-                            translated(
-                                &view,
-                                if door["locked"].as_bool().unwrap_or(false) {
-                                    "locked"
-                                } else if door["open"].as_bool().unwrap_or(false) {
-                                    "open"
-                                } else {
-                                    "closed"
-                                }
-                            )
+                            translated(&view, status)
                         ),
-                        AMBER,
+                        door_color(status),
                     );
                 }
             }
@@ -1243,7 +1253,7 @@ impl PlayerUi {
             );
             let line = Line::from(vec![
                 Span::styled(clip(&command, width), Style::default().fg(BLUE)),
-                Span::styled(description, Style::default().fg(ASH)),
+                Span::styled(description, Style::default().fg(door_color(&choice.status))),
             ]);
             frame.render_widget(
                 Paragraph::new(line).style(Style::default().bg(if selected {
@@ -1522,65 +1532,112 @@ fn draw(frame: &mut Frame<'_>, area: Rect, line: Line<'_>) {
     }
 }
 
-pub fn ascii_title(width: usize) -> Vec<String> {
-    let letters = [
-        ('B', [" __ ", "|__)", "|__)"]),
-        ('E', ["___ ", "|__ ", "|___"]),
-        ('L', ["    ", "|   ", "|___"]),
-        ('O', [" __ ", "/  \\", "\\__/"]),
-        ('W', ["     ", "| | |", "|_|_|"]),
-        ('T', ["___ ", " |  ", " |  "]),
-        ('H', ["    ", "|__|", "|  |"]),
-        ('C', [" __ ", "/   ", "\\__ "]),
-        ('R', [" __ ", "|__)", "| \\ "]),
-        ('N', ["    ", "|\\ |", "| \\|"]),
-    ];
-    if width < 25 {
-        return vec!["BELOW".into(), "THE CROWN".into()];
+const TITLE_WORDS: [[&str; 4]; 3] = [
+    [
+        "⣿⠛⠛⡄ ⣿⠛⠛⠃ ⣿    ⣤⠛⠛⡄ ⣿  ⡇",
+        "⣿⣤⣤⠃ ⣿⣤⣤  ⣿    ⣿  ⡇ ⣿⢠⡄⡇",
+        "⣿  ⡇ ⣿    ⣿    ⣿  ⡇ ⣿⢸⡇⡇",
+        "⠛⠛⠛  ⠛⠛⠛⠃ ⠛⠛⠛⠃  ⠛⠛   ⠃⠘ ",
+    ],
+    [
+        "⠛⢻⡟⠃ ⣿  ⡇ ⣿⠛⠛⠃",
+        " ⢸⡇  ⣿⣤⣤⡇ ⣿⣤⣤ ",
+        " ⢸⡇  ⣿  ⡇ ⣿   ",
+        " ⠘⠃  ⠛  ⠃ ⠛⠛⠛⠃",
+    ],
+    [
+        "⣤⠛⠛⠃ ⣿⠛⠛⡄ ⣤⠛⠛⡄ ⣿  ⡇ ⣿⡄ ⡇",
+        "⣿    ⣿⣤⣤⠃ ⣿  ⡇ ⣿⢠⡄⡇ ⣿⢣⡄⡇",
+        "⣿    ⣿⠘⢣  ⣿  ⡇ ⣿⢸⡇⡇ ⣿ ⢸⡇",
+        " ⠛⠛⠃ ⠛  ⠃  ⠛⠛   ⠃⠘  ⠛  ⠃",
+    ],
+];
+
+/// Whole-word title layout measured in terminal cells, with an ASCII fallback.
+pub fn title(width: usize, max_rows: usize, braille: bool) -> Vec<String> {
+    if width == 0 || max_rows == 0 {
+        return Vec::new();
     }
-    let draw_words = |words: &[&str]| {
-        (0..3)
-            .map(|row| {
-                words
-                    .iter()
-                    .map(|word| {
-                        word.chars()
-                            .map(|ch| letters.iter().find(|(c, _)| *c == ch).unwrap().1[row])
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    })
-                    .collect::<Vec<_>>()
-                    .join("   ")
-                    .trim_end()
-                    .to_owned()
-            })
-            .collect::<Vec<_>>()
-    };
-    let mut groups = Vec::new();
-    let mut current = Vec::new();
-    for word in ["BELOW", "THE", "CROWN"] {
-        let mut test = current.clone();
-        test.push(word);
-        if !current.is_empty() && draw_words(&test).iter().any(|row| row.len() > width) {
-            groups.push(current);
-            current = Vec::new();
+    let names = ["BELOW", "THE", "CROWN"];
+    let group = |widths: [usize; 3], gap: usize| {
+        let mut groups = vec![Vec::new()];
+        let mut used = 0;
+        for (word, word_width) in widths.into_iter().enumerate() {
+            let spacing = if used == 0 { 0 } else { gap };
+            if used > 0 && used + spacing + word_width > width {
+                groups.push(Vec::new());
+                used = 0;
+            }
+            if used > 0 {
+                used += gap;
+            }
+            used += word_width;
+            groups.last_mut().unwrap().push(word);
         }
-        current.push(word);
+        groups
+    };
+    if braille {
+        let widths = TITLE_WORDS.map(|rows| {
+            rows.iter()
+                .map(|row| UnicodeWidthStr::width(*row))
+                .max()
+                .unwrap()
+        });
+        let groups = group(widths, 3);
+        if widths.iter().all(|w| *w <= width) && groups.len() * 4 <= max_rows {
+            return groups
+                .into_iter()
+                .flat_map(|words| {
+                    (0..4).map(move |row| {
+                        words
+                            .iter()
+                            .map(|word| TITLE_WORDS[*word][row])
+                            .collect::<Vec<_>>()
+                            .join("   ")
+                            .trim_end()
+                            .to_owned()
+                    })
+                })
+                .collect();
+        }
     }
-    groups.push(current);
-    groups
+    group(names.map(str::len), 1)
         .into_iter()
-        .flat_map(|group| draw_words(&group))
+        .take(max_rows)
+        .map(|words| {
+            clip(
+                &words
+                    .iter()
+                    .map(|word| names[*word])
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                width,
+            )
+        })
         .collect()
 }
 
-pub fn render_join(frame: &mut Frame<'_>, draft: &Draft, language: &str, error: Option<&str>) {
+pub fn local_braille_support() -> bool {
+    let term = std::env::var("TERM").unwrap_or_default();
+    let locale = ["LC_ALL", "LC_CTYPE", "LANG"]
+        .into_iter()
+        .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()));
+    crate::ssh::supports_braille(&term, locale.as_deref())
+}
+
+pub fn render_join(
+    frame: &mut Frame<'_>,
+    draft: &Draft,
+    language: &str,
+    error: Option<&str>,
+    braille: bool,
+) {
     let area = frame.area();
     if area.height < 3 || area.width < 4 {
         return;
     }
     let width = usize::from(area.width - 2);
-    for (index, line) in ascii_title(width)
+    for (index, line) in title(width, usize::from(area.height - 3), braille)
         .into_iter()
         .take(usize::from(area.height - 3))
         .enumerate()

@@ -83,6 +83,257 @@ fn item_owned(engine: &mut Engine, id: u16, owner: u16) {
     }
 }
 
+fn door_choice(engine: &Engine, actor: u16, kind: &str, door: u16) -> Value {
+    engine.player_view(actor).unwrap()["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|action| action["intent"]["kind"] == kind && action["intent"]["doorId"] == door)
+        .unwrap_or_else(|| panic!("Missing {kind} choice for door {door}"))
+        .clone()
+}
+
+#[test]
+fn door_commands_remain_visible_across_lock_key_and_open_transitions() {
+    for language in ["en", "pl"] {
+        let mut engine =
+            Engine::memory_with_tuning("castle", language, 17, "multiplayer", tuning()).unwrap();
+        let player = engine.join_player("door-test", "Traveller", 4).unwrap();
+        engine
+            .world
+            .doors
+            .iter_mut()
+            .find(|d| d.id == 201)
+            .unwrap()
+            .flags = LOCKED;
+        for kind in ["move", "open", "unlock"] {
+            let choice = door_choice(&engine, player, kind, 201);
+            assert_eq!(choice["available"], false);
+            assert_eq!(
+                choice["status"],
+                if kind == "unlock" {
+                    "needs_key"
+                } else {
+                    "locked"
+                }
+            );
+            assert!(!choice["reason"].as_str().unwrap().is_empty());
+        }
+        assert_eq!(
+            door_choice(&engine, player, "move", 201)["hint"],
+            if language == "en" {
+                "locked"
+            } else {
+                "zamknięte na klucz"
+            }
+        );
+        assert_eq!(
+            door_choice(&engine, player, "unlock", 201)["hint"],
+            if language == "en" {
+                "needs matching key"
+            } else {
+                "wymaga pasującego klucza"
+            }
+        );
+        item_owned(&mut engine, 1001, player);
+        let key = engine
+            .world
+            .items
+            .iter_mut()
+            .find(|item| item.id == 1001)
+            .unwrap();
+        let matching = key.key.clone();
+        key.key = Some("test-owned-wrong-key".into());
+        assert_eq!(
+            door_choice(&engine, player, "unlock", 201)["status"],
+            "needs_key"
+        );
+        engine
+            .world
+            .items
+            .iter_mut()
+            .find(|item| item.id == 1001)
+            .unwrap()
+            .key = matching;
+        assert_eq!(
+            door_choice(&engine, player, "unlock", 201)["available"],
+            true
+        );
+        assert_eq!(
+            door_choice(&engine, player, "unlock", 201)["status"],
+            "ready"
+        );
+        finish(&mut engine, player, json!({"kind":"unlock","doorId":201}));
+        let go = door_choice(&engine, player, "move", 201);
+        assert_eq!(go["available"], false);
+        assert_eq!(go["status"], "closed");
+        assert_eq!(door_choice(&engine, player, "open", 201)["available"], true);
+        let before = serde_json::to_value(&engine.world).unwrap();
+        let refused = act(&mut engine, player, json!({"kind":"move","doorId":201}));
+        assert_eq!(refused["ok"], false);
+        assert_eq!(refused["message"], go["reason"]);
+        assert_eq!(serde_json::to_value(&engine.world).unwrap(), before);
+        finish(&mut engine, player, json!({"kind":"open","doorId":201}));
+        assert_eq!(door_choice(&engine, player, "move", 201)["available"], true);
+        assert_eq!(door_choice(&engine, player, "move", 201)["status"], "open");
+        assert_eq!(
+            door_choice(&engine, player, "close", 201)["available"],
+            true
+        );
+        assert_eq!(
+            door_choice(&engine, player, "lock", 201)["status"],
+            "close_first"
+        );
+        item_owned(&mut engine, 1001, 102);
+        assert_eq!(
+            door_choice(&engine, player, "lock", 201)["status"],
+            "needs_key"
+        );
+        item_owned(&mut engine, 1001, player);
+        finish(&mut engine, player, json!({"kind":"close","doorId":201}));
+        assert_eq!(door_choice(&engine, player, "lock", 201)["available"], true);
+        finish(&mut engine, player, json!({"kind":"lock","doorId":201}));
+        assert_eq!(
+            door_choice(&engine, player, "move", 201)["status"],
+            "locked"
+        );
+        assert_world(&engine.world).unwrap();
+    }
+}
+
+#[test]
+fn blocked_door_attempts_preserve_all_world_state_and_the_current_activity() {
+    for language in ["en", "pl"] {
+        let mut engine =
+            Engine::memory_with_tuning("castle", language, 17, "multiplayer", tuning()).unwrap();
+        let player = engine.join_player("door-refusal", "Traveller", 4).unwrap();
+        engine
+            .world
+            .doors
+            .iter_mut()
+            .find(|d| d.id == 201)
+            .unwrap()
+            .flags = LOCKED;
+        assert_eq!(
+            act(&mut engine, player, json!({"kind":"rest","seconds":120}))["ok"],
+            true
+        );
+        for kind in ["move", "open", "unlock"] {
+            let choice = door_choice(&engine, player, kind, 201);
+            let before = serde_json::to_value(&engine.world).unwrap();
+            let result = act(&mut engine, player, choice["intent"].clone());
+            assert_eq!(result["ok"], false);
+            assert_eq!(result["message"], choice["reason"]);
+            assert_eq!(serde_json::to_value(&engine.world).unwrap(), before);
+            assert!(matches!(
+                engine
+                    .actor(player)
+                    .unwrap()
+                    .activity
+                    .as_ref()
+                    .unwrap()
+                    .intent,
+                Intent::Rest { .. }
+            ));
+        }
+        let actions = engine.actions(player).unwrap();
+        let mut listed: Vec<_> = actions
+            .iter()
+            .filter(|a| a["intent"]["kind"] == "move")
+            .map(|a| a["intent"]["doorId"].as_u64().unwrap() as u16)
+            .collect();
+        let mut nearby: Vec<_> = engine
+            .exits(engine.actor(player).unwrap().room_id)
+            .iter()
+            .map(|d| d.id)
+            .collect();
+        listed.sort_unstable();
+        nearby.sort_unstable();
+        assert_eq!(listed, nearby);
+    }
+}
+
+#[test]
+fn movement_is_revalidated_when_a_door_changes_after_discovery() {
+    let mut engine = multi();
+    let player = engine.join_player("door-race", "Traveller", 4).unwrap();
+    engine
+        .world
+        .doors
+        .iter_mut()
+        .find(|d| d.id == 201)
+        .unwrap()
+        .flags = OPEN;
+    let proposed = door_choice(&engine, player, "move", 201);
+    assert_eq!(proposed["available"], true);
+    finish(&mut engine, 102, json!({"kind":"close","doorId":201}));
+    finish(&mut engine, 102, json!({"kind":"lock","doorId":201}));
+    let before = serde_json::to_value(&engine.world).unwrap();
+    let result = act(&mut engine, player, proposed["intent"].clone());
+    assert_eq!(result["ok"], false);
+    assert!(result["message"].as_str().unwrap().contains("locked"));
+    assert_eq!(serde_json::to_value(&engine.world).unwrap(), before);
+    assert_eq!(
+        door_choice(&engine, player, "move", 201)["status"],
+        "locked"
+    );
+}
+
+#[test]
+fn visible_door_commands_respect_restraint_combat_and_busy_actions() {
+    let mut engine = multi();
+    let player = engine.join_player("door-gates", "Traveller", 4).unwrap();
+    engine
+        .world
+        .doors
+        .iter_mut()
+        .find(|d| d.id == 201)
+        .unwrap()
+        .flags = OPEN;
+    engine.actor_mut(player).unwrap().flags |= RESTRAINED;
+    let go = door_choice(&engine, player, "move", 201);
+    assert_eq!(go["available"], false);
+    assert_eq!(go["status"], "blocked");
+    let before = serde_json::to_value(&engine.world).unwrap();
+    assert_eq!(
+        act(&mut engine, player, go["intent"].clone())["message"],
+        go["reason"]
+    );
+    assert_eq!(serde_json::to_value(&engine.world).unwrap(), before);
+    engine.actor_mut(player).unwrap().flags &= !RESTRAINED;
+    assert_eq!(
+        act(&mut engine, player, json!({"kind":"close","doorId":201}))["ok"],
+        true
+    );
+    assert_eq!(
+        door_choice(&engine, player, "move", 201)["status"],
+        "blocked"
+    );
+    let activity = engine.actor(player).unwrap().activity.clone().unwrap();
+    engine
+        .advance(activity.interaction_ends.unwrap() - engine.world.interaction_time + 1e-8)
+        .unwrap();
+    finish(&mut engine, player, json!({"kind":"open","doorId":201}));
+    assert_eq!(
+        act(
+            &mut engine,
+            player,
+            json!({"kind":"attack","targetId":102,"style":"subdue"})
+        )["ok"],
+        true
+    );
+    assert!(!engine.combat_view(player).unwrap().is_null());
+    let go = door_choice(&engine, player, "move", 201);
+    assert_eq!(go["available"], false);
+    assert_eq!(go["status"], "blocked");
+    let before = serde_json::to_value(&engine.world).unwrap();
+    assert_eq!(
+        act(&mut engine, player, go["intent"].clone())["message"],
+        go["reason"]
+    );
+    assert_eq!(serde_json::to_value(&engine.world).unwrap(), before);
+}
+
 fn walk(engine: &mut Engine, id: u16, destination: u16) {
     let origin = engine.actor(id).unwrap().room_id;
     let mut queue = std::collections::VecDeque::from([origin]);
@@ -661,8 +912,8 @@ fn addressed_shouts_wake_every_listener_without_interrupting_physical_activity()
     let wakes = engine.drain_wakes();
     assert!(wakes.iter().any(|wake| wake.actor_id == 102));
     assert!(wakes.iter().any(|wake| wake.actor_id == 104));
-    assert!(wakes.iter().all(|wake| !wake.urgent));
-    assert_eq!(engine.actor(104).unwrap().decision_version, version);
+    assert!(wakes.iter().all(|wake| !wake.urgent()));
+    assert_eq!(engine.actor(104).unwrap().decision_version, version + 1);
     assert_eq!(json!(engine.actor(104).unwrap().activity), activity);
 }
 #[test]
@@ -850,14 +1101,15 @@ fn ordinary_speech_does_not_interrupt_a_physical_activity_or_plan() {
     act(&mut engine, PLAYER, speech("Hello. Another short message."));
     assert_eq!(json!(engine.actor(102).unwrap().activity), activity);
     assert_eq!(json!(engine.actor(102).unwrap().plan), plan);
-    assert_eq!(engine.actor(102).unwrap().decision_version, version);
+    assert_eq!(engine.actor(102).unwrap().decision_version, version + 1);
     let wake = engine
         .drain_wakes()
         .into_iter()
         .find(|w| w.actor_id == 102)
         .unwrap();
-    assert!(!wake.urgent);
-    assert_eq!(wake.version, version);
+    assert!(!wake.urgent());
+    assert_eq!(wake.version, version + 1);
+    assert_eq!(wake.priority, WakePriority::Conversation);
 }
 
 #[test]
@@ -887,6 +1139,336 @@ fn npc_can_answer_while_a_brief_action_and_its_remaining_plan_continue() {
     engine.advance(0.5).unwrap();
     assert_ne!(engine.door(201).unwrap().flags & OPEN, 0);
 }
+
+#[test]
+fn a_conversation_preserves_long_duty_and_the_remaining_plan() {
+    for seconds in [240, 960] {
+        let mut engine = solo();
+        let original = decision(vec![
+            json!({"kind":"guard","seconds":seconds}),
+            json!({"kind":"unlock","doorId":201}),
+        ]);
+        assert_eq!(apply(&mut engine, 102, original)["ok"], true);
+        let activity = json!(engine.actor(102).unwrap().activity);
+        let plan = json!(engine.actor(102).unwrap().plan);
+        assert_eq!(
+            act(&mut engine, PLAYER, speech("My name is Halina."))["ok"],
+            true
+        );
+        assert_eq!(
+            apply(
+                &mut engine,
+                102,
+                decision(vec![speech("Then answer me, Halina.")])
+            )["ok"],
+            true
+        );
+        assert_eq!(json!(engine.actor(102).unwrap().activity), activity);
+        assert_eq!(json!(engine.actor(102).unwrap().plan), plan);
+        engine
+            .advance(f64::from(seconds) / CLOCK_RATE + 1e-8)
+            .unwrap();
+        assert!(matches!(
+            engine.actor(102).unwrap().activity.as_ref().unwrap().intent,
+            Intent::Unlock { door_id: 201 }
+        ));
+    }
+}
+
+#[test]
+fn an_npc_can_answer_during_travel_without_teleporting_or_replanning() {
+    for travel in [1.25, 3.5] {
+        let mut engine = solo();
+        engine.tuning.travel_seconds = travel;
+        engine
+            .world
+            .doors
+            .iter_mut()
+            .find(|door| door.id == 201)
+            .unwrap()
+            .flags = OPEN;
+        assert_eq!(
+            apply(
+                &mut engine,
+                102,
+                decision(vec![
+                    json!({"kind":"move","doorId":201}),
+                    json!({"kind":"guard","seconds":240})
+                ])
+            )["ok"],
+            true
+        );
+        let activity = json!(engine.actor(102).unwrap().activity);
+        let plan = json!(engine.actor(102).unwrap().plan);
+        assert_eq!(
+            act(&mut engine, PLAYER, speech("Where are you going?"))["ok"],
+            true
+        );
+        assert_eq!(
+            apply(
+                &mut engine,
+                102,
+                decision(vec![speech("To the corridor. Stay here.")])
+            )["ok"],
+            true
+        );
+        assert_eq!(json!(engine.actor(102).unwrap().activity), activity);
+        assert_eq!(json!(engine.actor(102).unwrap().plan), plan);
+        assert_eq!(
+            apply(
+                &mut engine,
+                102,
+                decision(vec![json!({"kind":"wait","seconds":240})])
+            )["ok"],
+            false
+        );
+        engine.advance(travel - 0.25).unwrap();
+        assert_eq!(engine.actor(102).unwrap().room_id, 1);
+        engine.advance(0.25 + 1e-8).unwrap();
+        assert_eq!(engine.actor(102).unwrap().room_id, 2);
+        assert!(matches!(
+            engine.actor(102).unwrap().activity.as_ref().unwrap().intent,
+            Intent::Guard { seconds: 240 }
+        ));
+    }
+}
+
+#[test]
+fn conversational_and_danger_wakes_cannot_be_overwritten_by_routine_completion() {
+    for language in ["en", "pl"] {
+        let mut engine =
+            Engine::memory_with_tuning("castle", language, 17, "solo", tuning()).unwrap();
+        engine.drain_wakes();
+        act(&mut engine, PLAYER, speech("Nazywam się Halina."));
+        engine.wake_idle(102).unwrap();
+        let wake = engine
+            .drain_wakes()
+            .into_iter()
+            .find(|w| w.actor_id == 102)
+            .unwrap();
+        assert_eq!(wake.priority, WakePriority::Conversation);
+        assert!(wake.reason.contains("Halina"));
+        act(
+            &mut engine,
+            PLAYER,
+            json!({"kind":"attack","targetId":102,"style":"subdue"}),
+        );
+        act(&mut engine, PLAYER, speech("Hello again."));
+        engine.wake_idle(102).unwrap();
+        let wake = engine
+            .drain_wakes()
+            .into_iter()
+            .find(|w| w.actor_id == 102)
+            .unwrap();
+        assert_eq!(wake.priority, WakePriority::Danger);
+        assert!(!wake.reason.contains("Hello again."));
+        assert_eq!(wake.version, engine.actor(102).unwrap().decision_version);
+    }
+}
+
+#[test]
+fn recent_dialogue_keeps_speech_after_routine_memories_and_allows_its_evidence() {
+    let mut engine = solo();
+    let result = act(&mut engine, PLAYER, speech("Actually, I am Halina."));
+    let event = result["eventId"].as_u64().unwrap();
+    for _ in 0..30 {
+        act(&mut engine, 102, json!({"kind":"inspect","targetId":102}));
+    }
+    let observed = engine.observation(102, "Routine duty.").unwrap();
+    let dialogue = observed["input"]["recentDialogue"].as_array().unwrap();
+    let heard = dialogue.iter().find(|m| m["eventId"] == event).unwrap();
+    assert_eq!(heard["kind"], "heard");
+    assert!(heard["text"].as_str().unwrap().contains("Halina"));
+    assert_eq!(heard["sourceId"], PLAYER);
+    let evidence = observed["context"]["evidenceIds"].as_array().unwrap();
+    assert!(evidence.contains(&heard["id"]));
+    let mut update = decision(vec![json!({"kind":"guard","seconds":600})]);
+    update["memories"] = json!([{"kind":"belief","text":"The prisoner claims a different name.","importance":6,"evidenceIds":[heard["id"]]}]);
+    let answer = engine
+        .apply_decision(
+            102,
+            update,
+            observed["context"]["version"].as_u64().unwrap(),
+            &evidence
+                .iter()
+                .map(|id| id.as_u64().unwrap())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+    assert_eq!(answer["ok"], true, "{answer}");
+}
+
+#[test]
+fn observation_supplies_each_memory_once_without_losing_dialogue_evidence() {
+    let mut engine = solo();
+    for message in ["My name is Halina.", "Have you heard me?", "Answer me."] {
+        assert_eq!(act(&mut engine, PLAYER, speech(message))["ok"], true);
+    }
+    let observed = engine
+        .observation(102, "Halina is asking for an answer.")
+        .unwrap();
+    let memories = observed["input"]["memories"].as_array().unwrap();
+    let dialogue = observed["input"]["recentDialogue"].as_array().unwrap();
+    assert_eq!(dialogue.len(), 3);
+    assert!(!memories.is_empty());
+    let supplied: std::collections::BTreeSet<_> = memories
+        .iter()
+        .chain(dialogue)
+        .map(|memory| memory["id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(supplied.len(), memories.len() + dialogue.len());
+    let evidence: std::collections::BTreeSet<_> = observed["context"]["evidenceIds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|id| id.as_u64().unwrap())
+        .collect();
+    assert_eq!(evidence, supplied);
+    assert!(dialogue[0]["text"].as_str().unwrap().contains("Halina"));
+    assert!(dialogue[2]["text"].as_str().unwrap().contains("Answer me."));
+}
+
+#[test]
+fn an_npcs_own_repetition_cannot_push_other_speakers_out_of_recent_dialogue() {
+    let mut engine = solo();
+    for message in ["I am Halina.", "Please answer me."] {
+        assert_eq!(act(&mut engine, PLAYER, speech(message))["ok"], true);
+    }
+    for index in 0..14 {
+        assert_eq!(
+            act(
+                &mut engine,
+                102,
+                speech(&format!("A repeated warning {index}."))
+            )["ok"],
+            true
+        );
+    }
+    for (others, own) in [(2, 3), (1, 5), (2, 0)] {
+        let dialogue = engine.store.recent_dialogue(102, others, own).unwrap();
+        assert_eq!(dialogue.len(), others + own);
+        assert_eq!(
+            dialogue
+                .iter()
+                .filter(|memory| memory.source_id == Some(PLAYER))
+                .count(),
+            others
+        );
+        assert_eq!(
+            dialogue
+                .iter()
+                .filter(|memory| memory.source_id == Some(102))
+                .count(),
+            own
+        );
+        assert!(dialogue.windows(2).all(|pair| pair[0].id < pair[1].id));
+        assert!(
+            dialogue
+                .iter()
+                .any(|memory| memory.text.contains("Please answer me."))
+        );
+        for index in 14 - own..14 {
+            assert!(dialogue.iter().any(|memory| {
+                memory.source_id == Some(102) && memory.text.contains(&format!("warning {index}."))
+            }));
+        }
+    }
+    let observed = engine.observation(102, "Conversation.").unwrap();
+    assert!(
+        observed["input"]["recentDialogue"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|memory| memory["text"].as_str().unwrap().contains("Halina"))
+    );
+}
+
+#[test]
+fn recent_dialogue_preserves_private_and_muffled_speech_boundaries() {
+    let mut engine = solo();
+    engine.actor_mut(104).unwrap().room_id = 2;
+    engine
+        .actor_mut(104)
+        .unwrap()
+        .known_actors
+        .retain(|id| *id != PLAYER);
+    let secret = act(&mut engine, PLAYER, json!({"kind":"speak","text":"A private secret.","targetId":102,"volume":"whisper","plot":null}))["eventId"].as_u64().unwrap();
+    let shout = act(&mut engine, PLAYER, json!({"kind":"speak","text":"Open the door!","targetId":null,"volume":"shout","plot":null}))["eventId"].as_u64().unwrap();
+    let observed = engine.observation(104, "Heard something.").unwrap();
+    let dialogue = observed["input"]["recentDialogue"].as_array().unwrap();
+    assert!(!dialogue.iter().any(|m| m["eventId"] == secret));
+    let heard = dialogue.iter().find(|m| m["eventId"] == shout).unwrap();
+    let projected = engine.store.observed_event(104, shout).unwrap().unwrap();
+    assert_eq!(heard["text"], projected.text);
+    assert_eq!(heard["sourceId"], Value::Null);
+    assert!(heard["text"].as_str().unwrap().contains('-'));
+    assert!(!heard["text"].as_str().unwrap().contains("Open the door!"));
+}
+
+#[test]
+fn a_failed_later_plan_step_explains_the_failure_in_the_next_routine_wake() {
+    let mut engine = solo();
+    engine.drain_wakes();
+    let result = apply(
+        &mut engine,
+        102,
+        decision(vec![
+            speech("I will take my key."),
+            json!({"kind":"take","itemId":1001}),
+        ]),
+    );
+    assert_eq!(result["ok"], true);
+    let wake = engine
+        .drain_wakes()
+        .into_iter()
+        .find(|w| w.actor_id == 102)
+        .unwrap();
+    assert_eq!(wake.priority, WakePriority::Routine);
+    assert!(wake.reason.contains("plan stopped"));
+    assert!(wake.reason.contains("belongs to someone alive"));
+    assert_eq!(engine.item(1001).unwrap().owner_id, Some(102));
+    assert!(engine.actor(102).unwrap().plan.is_empty());
+}
+
+#[test]
+fn a_failed_scheduled_action_explains_the_failure_and_cancels_dependent_steps() {
+    for duration in [0.4, 1.1] {
+        let mut engine = solo();
+        engine.tuning.action_seconds = duration;
+        finish(&mut engine, 102, json!({"kind":"drop","itemId":1001}));
+        assert_eq!(
+            act(&mut engine, PLAYER, json!({"kind":"take","itemId":1001}))["ok"],
+            true
+        );
+        engine.advance(duration / 3.0).unwrap();
+        assert_eq!(
+            apply(
+                &mut engine,
+                102,
+                decision(vec![
+                    json!({"kind":"take","itemId":1001}),
+                    json!({"kind":"unlock","doorId":201})
+                ])
+            )["ok"],
+            true
+        );
+        engine.drain_wakes();
+        engine.advance(duration + 1e-8).unwrap();
+        assert_eq!(engine.item(1001).unwrap().owner_id, Some(PLAYER));
+        assert_ne!(engine.door(201).unwrap().flags & LOCKED, 0);
+        assert!(engine.actor(102).unwrap().plan.is_empty());
+        assert!(engine.actor(102).unwrap().activity.is_none());
+        let wake = engine
+            .drain_wakes()
+            .into_iter()
+            .find(|wake| wake.actor_id == 102)
+            .unwrap();
+        assert_eq!(wake.priority, WakePriority::Routine);
+        assert!(wake.reason.contains("plan stopped"));
+        assert!(wake.reason.contains("belongs to someone alive"));
+    }
+}
+
 #[test]
 fn crossings_use_test_owned_real_duration_and_revalidate_closed_doors() {
     for travel in [1.25, 3.5] {
@@ -929,7 +1511,7 @@ fn crossings_use_test_owned_real_duration_and_revalidate_closed_doors() {
             .events(Some(PLAYER), 100)
             .unwrap()
             .iter()
-            .any(|e| e.text.contains("door must be open"))
+            .any(|e| e.text.contains("door is closed"))
     );
 }
 #[test]

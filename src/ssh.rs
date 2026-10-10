@@ -907,7 +907,7 @@ async fn terminal(
                 }
                 if dirty{
                     let language={let manager=game.manager.borrow();if manager["language"].as_str()==Some("pl"){"pl"}else{"en"}};
-                    terminal.draw(|frame|{if player.is_some(){ui.render(frame);}else{ui::render_join(frame,&draft,language,join_error.as_deref());}})?;
+                    terminal.draw(|frame|{if player.is_some(){ui.render(frame);}else{ui::render_join(frame,&draft,language,join_error.as_deref(),ui.utf8);}})?;
                     let output=bytes.take()?;
                     if let Err(error)=send(&writer,output).await{render_error=Some(error);break;}
                     dirty=false;

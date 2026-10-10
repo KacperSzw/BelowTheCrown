@@ -5,7 +5,7 @@ use crate::{
     },
     content::WorldContent,
     engine::Engine,
-    model::{EFFORT, MODEL, Wake},
+    model::{EFFORT, MODEL, Wake, WakePriority},
     paths::write_private,
     runtime::{GameHandle, HostInfo, PlayerConnection, RuntimeRequest},
 };
@@ -33,7 +33,7 @@ impl Default for Scheduling {
         Self {
             maximum_calls: 4,
             speech_batch: 2.,
-            routine_cooldown: 4.,
+            routine_cooldown: 15.,
             background_interval: 30.,
             aging: 30.,
             timeout: Duration::from_secs(120),
@@ -291,15 +291,18 @@ impl Simulation {
             }
             let id = wake.actor_id;
             if let Some(queued) = self.queued.get_mut(&id) {
-                let urgent = queued.wake.urgent || wake.urgent;
-                queued.wake = wake;
-                queued.wake.urgent = urgent;
-                if queued.wake.urgent {
+                let new_conversation = wake.priority == WakePriority::Conversation;
+                queued.wake.merge(wake);
+                if queued.wake.priority != WakePriority::Routine {
                     queued.ready = self.wall;
+                }
+                if new_conversation {
+                    queued.attempt = 0;
+                    queued.feedback = None;
                 }
             } else {
                 let ready = self.wall
-                    + if wake.urgent {
+                    + if wake.priority != WakePriority::Routine {
                         0.
                     } else {
                         self.scheduling.speech_batch
@@ -376,8 +379,10 @@ impl Simulation {
                 {
                     continue;
                 }
-                let danger = q.wake.urgent || self.combat(*id).is_some();
+                let danger = q.wake.urgent() || self.combat(*id).is_some();
+                let conversation = q.wake.priority == WakePriority::Conversation;
                 if !danger
+                    && !conversation
                     && self
                         .last_started
                         .get(id)
@@ -389,6 +394,7 @@ impl Simulation {
                 let aged = self.wall - q.created >= self.scheduling.aging;
                 if !foreground
                     && !danger
+                    && !conversation
                     && !aged
                     && self
                         .jobs
@@ -401,10 +407,12 @@ impl Simulation {
                 }
                 let priority = if danger {
                     0
-                } else if foreground || aged {
+                } else if conversation {
                     2
-                } else {
+                } else if foreground || aged {
                     3
+                } else {
+                    4
                 };
                 let room = self.engine.actor(*id)?.room_id;
                 candidates.push((
@@ -492,7 +500,11 @@ impl Simulation {
     }
     fn launch_listener(&mut self, message: Message) -> Result<()> {
         let actor = message.actor;
-        let view = self.player_view(actor)?;
+        let mut view = self.player_view(actor)?;
+        // Command discovery includes blocked doors; model suggestions stay executable.
+        if let Some(actions) = view["actions"].as_array_mut() {
+            actions.retain(|action| action["available"].as_bool() != Some(false));
+        }
         let mut allowed = HashSet::from([actor]);
         gather_ids(&view, &mut allowed);
         let request = ThinkRequest {
@@ -633,7 +645,12 @@ impl Simulation {
                 if let Some(mut q) = job.queued.filter(|q| q.attempt < 1) {
                     q.attempt += 1;
                     q.feedback = Some(error);
-                    q.ready = self.wall + self.scheduling.routine_cooldown;
+                    q.ready = self.wall
+                        + if q.wake.priority == WakePriority::Routine {
+                            self.scheduling.routine_cooldown
+                        } else {
+                            0.
+                        };
                     self.queued.insert(job.actor, q);
                 }
             }
@@ -1076,9 +1093,26 @@ impl Simulation {
         if self.can_run() {
             self.engine.advance(elapsed)?;
         }
-        if self.wall - self.last_idle >= self.scheduling.background_interval {
+        if self.can_run() && self.wall - self.last_idle >= self.scheduling.background_interval {
             self.last_idle = self.wall;
-            self.engine.initialize_minds()?;
+            let idle: Vec<_> = self
+                .engine
+                .world
+                .actors
+                .iter()
+                .filter(|actor| {
+                    !self.engine.is_player(actor.id)
+                        && actor.awake()
+                        && actor.activity.is_none()
+                        && actor.plan.is_empty()
+                        && !self.queued.contains_key(&actor.id)
+                        && !self.inflight.values().any(|key| *key == (actor.id, false))
+                })
+                .map(|actor| actor.id)
+                .collect();
+            for actor in idle {
+                self.engine.wake_idle(actor)?;
+            }
         }
         self.pump()?;
         self.publish()
@@ -1245,7 +1279,11 @@ mod tests {
                     actor_id: id,
                     version,
                     reason: "A controlled wake.".into(),
-                    urgent,
+                    priority: if urgent {
+                        WakePriority::Danger
+                    } else {
+                        WakePriority::Routine
+                    },
                 },
                 order,
                 created,
@@ -1279,30 +1317,63 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn speech_batches_and_does_not_interrupt_a_valid_turn() {
+    async fn player_speech_supersedes_inflight_routine_and_conversation_answers() {
         let (mut sim, mut requests, _) = fixture();
+        sim.scheduling.maximum_calls = 1;
+        sim.scheduling.routine_cooldown = 40.;
+        sim.scheduling.speech_batch = 3.;
         let player = sim.join(None, "Fixture Guest".into()).unwrap();
         only(&mut sim, &[102]);
+        sim.tick(3.).unwrap();
+        let (_, routine) = started(&mut requests).await;
+        let stale = sim.jobs[&(102, false)].cancel.clone();
+        routine.send(Ok(decision(json!([
+            {"kind":"speak","text":"An obsolete routine warning.","targetId":null,"volume":"normal","plot":null},
+            {"kind":"wait","seconds":1200}
+        ])))).unwrap();
         sim.player_request(player.actor_id, "input", json!({"text":"Hello."}))
             .unwrap();
-        sim.tick(1.5).unwrap();
-        assert!(requests.try_recv().is_err());
-        sim.tick(0.5).unwrap();
-        let (request, reply) = started(&mut requests).await;
-        assert_eq!(request.actor_id, 102);
-        let id = sim.jobs[&(102, false)].id;
-        let version = sim.engine.actor(102).unwrap().decision_version;
-        sim.player_request(player.actor_id, "input", json!({"text":"Still here."}))
-            .unwrap();
-        sim.collect();
-        assert_eq!(sim.jobs[&(102, false)].id, id);
-        assert_eq!(sim.engine.actor(102).unwrap().decision_version, version);
-        assert!(!sim.jobs[&(102, false)].cancel.is_cancelled());
-        reply
-            .send(Ok(decision(json!([{"kind":"wait","seconds":1800}]))))
-            .unwrap();
+        sim.pump().unwrap();
+        assert!(stale.is_cancelled());
+        assert!(!sim.jobs.contains_key(&(102, false)));
+        assert_eq!(sim.inflight.len(), 1);
         finish(&mut sim).await;
-        assert_eq!(sim.statuses[&(102, false)].state, "idle");
+        sim.pump().unwrap();
+        let (hello, obsolete) = started(&mut requests).await;
+        assert!(hello.input["reason"].as_str().unwrap().contains("Hello."));
+        obsolete.send(Ok(decision(json!([
+            {"kind":"speak","text":"An obsolete conversational answer.","targetId":null,"volume":"normal","plot":null}
+        ])))).unwrap();
+        sim.player_request(
+            player.actor_id,
+            "input",
+            json!({"text":"Actually, I'm Halina."}),
+        )
+        .unwrap();
+        sim.pump().unwrap();
+        finish(&mut sim).await;
+        sim.pump().unwrap();
+        let (latest, reply) = started(&mut requests).await;
+        assert!(latest.input["reason"].as_str().unwrap().contains("Halina"));
+        assert_eq!(
+            sim.wall, 3.,
+            "Conversation starts without waiting for routine cooldown or batching"
+        );
+        reply.send(Ok(decision(json!([
+            {"kind":"speak","text":"Halina? The register says otherwise.","targetId":null,"volume":"normal","plot":null},
+            {"kind":"guard","seconds":1200}
+        ])))).unwrap();
+        finish(&mut sim).await;
+        let speech: Vec<_> = sim
+            .engine
+            .store
+            .events(Some(player.actor_id), 100)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.actor_id == Some(102) && e.kind == "speech")
+            .collect();
+        assert_eq!(speech.len(), 1);
+        assert!(speech[0].text.contains("Halina?"));
         sim.cancel_all();
     }
 
@@ -1311,7 +1382,7 @@ mod tests {
         for cooldown in [3., 7.] {
             let (mut sim, mut requests, _) = fixture();
             sim.scheduling.routine_cooldown = cooldown;
-            let player = sim.join(None, "Fixture Guest".into()).unwrap();
+            sim.join(None, "Fixture Guest".into()).unwrap();
             only(&mut sim, &[102]);
             sim.tick(2.).unwrap();
             let (_, reply) = started(&mut requests).await;
@@ -1319,12 +1390,7 @@ mod tests {
                 .send(Ok(decision(json!([{"kind":"wait","seconds":1800}]))))
                 .unwrap();
             finish(&mut sim).await;
-            sim.player_request(
-                player.actor_id,
-                "input",
-                json!({"text":"Tell me your name."}),
-            )
-            .unwrap();
+            sim.engine.wake_idle(102).unwrap();
             sim.collect();
             sim.tick(cooldown - 0.01).unwrap();
             assert!(requests.try_recv().is_err());
@@ -1332,6 +1398,159 @@ mod tests {
             assert_eq!(started(&mut requests).await.0.actor_id, 102);
             sim.cancel_all();
         }
+    }
+
+    #[tokio::test]
+    async fn pending_conversation_survives_physical_completion_and_routine_wakes() {
+        let (mut sim, mut requests, _) = fixture();
+        sim.scheduling.maximum_calls = 1;
+        let player = sim.join(None, "Fixture Guest".into()).unwrap();
+        sim.queued.clear();
+        sim.engine
+            .dispatch(102, json!({"kind":"guard","seconds":60}), vec![], None)
+            .unwrap();
+        let physical = json!(sim.engine.actor(102).unwrap().activity);
+        sim.player_request(
+            player.actor_id,
+            "input",
+            json!({"text":"My name is Halina."}),
+        )
+        .unwrap();
+        sim.collect();
+        assert_eq!(json!(sim.engine.actor(102).unwrap().activity), physical);
+        sim.engine.advance(60. / crate::model::CLOCK_RATE).unwrap();
+        sim.engine.wake_idle(102).unwrap();
+        sim.collect();
+        let queued = &sim.queued[&102];
+        assert_eq!(queued.wake.priority, WakePriority::Conversation);
+        assert!(queued.wake.reason.contains("Halina"));
+        sim.pump().unwrap();
+        let (request, _) = started(&mut requests).await;
+        assert!(request.input["reason"].as_str().unwrap().contains("Halina"));
+        assert!(
+            request.input["recentDialogue"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["text"].as_str().unwrap().contains("Halina"))
+        );
+        sim.cancel_all();
+    }
+
+    #[tokio::test]
+    async fn world_calendar_cannot_bypass_real_routine_cooldown_but_speech_can() {
+        for cooldown in [9., 17.] {
+            let (mut sim, mut requests, _) = fixture();
+            sim.scheduling.maximum_calls = 1;
+            sim.scheduling.routine_cooldown = cooldown;
+            let player = sim.join(None, "Fixture Guest".into()).unwrap();
+            only(&mut sim, &[102]);
+            sim.tick(2.).unwrap();
+            let (_, reply) = started(&mut requests).await;
+            reply
+                .send(Ok(decision(json!([{"kind":"guard","seconds":600}]))))
+                .unwrap();
+            finish(&mut sim).await;
+            let real = sim.wall;
+            let calendar = sim.engine.world.time;
+            sim.engine.advance(600. / crate::model::CLOCK_RATE).unwrap();
+            assert!((sim.engine.world.time - calendar - 600.).abs() < 1e-7);
+            assert_eq!(sim.wall, real);
+            sim.pump().unwrap();
+            assert!(requests.try_recv().is_err());
+            sim.tick(cooldown - 0.1).unwrap();
+            assert!(requests.try_recv().is_err());
+            sim.player_request(player.actor_id, "input", json!({"text":"Who are you?"}))
+                .unwrap();
+            sim.pump().unwrap();
+            let (request, _) = started(&mut requests).await;
+            assert!(
+                request.input["reason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Who are you?")
+            );
+            sim.cancel_all();
+        }
+    }
+
+    #[tokio::test]
+    async fn idle_refresh_does_not_create_a_second_request_while_a_mind_is_thinking() {
+        let (mut sim, mut requests, _) = fixture();
+        sim.scheduling.maximum_calls = 1;
+        sim.scheduling.background_interval = 5.;
+        sim.join(None, "Fixture Guest".into()).unwrap();
+        only(&mut sim, &[102]);
+        sim.tick(2.).unwrap();
+        let (request, _) = started(&mut requests).await;
+        assert_eq!(request.actor_id, 102);
+        sim.tick(6.).unwrap();
+        assert!(!sim.queued.contains_key(&102));
+        assert!(sim.jobs.contains_key(&(102, false)));
+        assert!(requests.try_recv().is_err());
+        sim.cancel_all();
+    }
+
+    #[tokio::test]
+    async fn a_burst_of_speech_preserves_dialogue_and_starts_only_the_latest_observation() {
+        let (mut sim, mut requests, _) = fixture();
+        sim.scheduling.maximum_calls = 1;
+        let player = sim.join(None, "Fixture Guest".into()).unwrap();
+        only(&mut sim, &[102]);
+        for text in ["Hello.", "I'm Halina.", "Did you hear me?"] {
+            sim.player_request(player.actor_id, "input", json!({"text":text}))
+                .unwrap();
+            sim.collect();
+        }
+        sim.pump().unwrap();
+        let (request, _) = started(&mut requests).await;
+        assert!(
+            request.input["reason"]
+                .as_str()
+                .unwrap()
+                .contains("Did you hear me?")
+        );
+        let dialogue: Vec<_> = request.input["recentDialogue"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["text"].as_str().unwrap())
+            .collect();
+        assert!(dialogue[dialogue.len() - 3].contains("Hello."));
+        assert!(dialogue[dialogue.len() - 2].contains("Halina"));
+        assert!(dialogue[dialogue.len() - 1].contains("Did you hear me?"));
+        assert!(requests.try_recv().is_err());
+        assert_eq!(sim.inflight.len(), 1);
+        sim.cancel_all();
+    }
+
+    #[tokio::test]
+    async fn conversational_validation_failure_gets_one_immediate_correction() {
+        let (mut sim, mut requests, _) = fixture();
+        sim.scheduling.maximum_calls = 1;
+        sim.scheduling.routine_cooldown = 50.;
+        let player = sim.join(None, "Fixture Guest".into()).unwrap();
+        only(&mut sim, &[102]);
+        sim.player_request(
+            player.actor_id,
+            "input",
+            json!({"text":"Will you give me your key?"}),
+        )
+        .unwrap();
+        sim.pump().unwrap();
+        let (_, first) = started(&mut requests).await;
+        let bad = json!([{"kind":"take","itemId":1001}]);
+        first.send(Ok(decision(bad.clone()))).unwrap();
+        finish(&mut sim).await;
+        sim.pump().unwrap();
+        let (retry, second) = started(&mut requests).await;
+        assert!(retry.input["reason"].as_str().unwrap().contains("rejected"));
+        assert_eq!(sim.wall, 0.);
+        second.send(Ok(decision(bad))).unwrap();
+        finish(&mut sim).await;
+        assert!(!sim.queued.contains_key(&102));
+        assert_eq!(sim.statuses[&(102, false)].state, "failed");
+        sim.cancel_all();
     }
 
     #[tokio::test]
@@ -1517,6 +1736,19 @@ mod tests {
         assert!(request.listener);
         assert_eq!(request.actor_id, first.actor_id);
         assert!(request.input.get("world").is_some());
+        let offered = request.input["world"]["actions"].as_array().unwrap();
+        assert!(!offered.is_empty());
+        assert!(
+            offered.iter().all(|action| action["available"] != false),
+            "Blocked door suggestions are for player discovery, not model actions"
+        );
+        assert!(
+            sim.player_view(first.actor_id).unwrap()["actions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|action| action["available"] == false)
+        );
         reply
             .send(Ok(ThinkResult {
                 decision: json!({"summary":"No physical request.","plan":[]}),

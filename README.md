@@ -1,3 +1,10 @@
+```text
+⣿⠛⠛⡄ ⣿⠛⠛⠃ ⣿    ⣤⠛⠛⡄ ⣿  ⡇   ⠛⢻⡟⠃ ⣿  ⡇ ⣿⠛⠛⠃   ⣤⠛⠛⠃ ⣿⠛⠛⡄ ⣤⠛⠛⡄ ⣿  ⡇ ⣿⡄ ⡇
+⣿⣤⣤⠃ ⣿⣤⣤  ⣿    ⣿  ⡇ ⣿⢠⡄⡇    ⢸⡇  ⣿⣤⣤⡇ ⣿⣤⣤    ⣿    ⣿⣤⣤⠃ ⣿  ⡇ ⣿⢠⡄⡇ ⣿⢣⡄⡇
+⣿  ⡇ ⣿    ⣿    ⣿  ⡇ ⣿⢸⡇⡇    ⢸⡇  ⣿  ⡇ ⣿      ⣿    ⣿⠘⢣  ⣿  ⡇ ⣿⢸⡇⡇ ⣿ ⢸⡇
+⠛⠛⠛  ⠛⠛⠛⠃ ⠛⠛⠛⠃  ⠛⠛   ⠃⠘     ⠘⠃  ⠛  ⠃ ⠛⠛⠛⠃    ⠛⠛⠃ ⠛  ⠃  ⠛⠛   ⠃⠘  ⠛  ⠃
+```
+
 # Below the Crown
 
 A living castle in your terminal. Escape the dungeon. Bring down the king.

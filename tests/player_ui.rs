@@ -185,7 +185,7 @@ fn physical_choices_and_auto_use_public_view_only() {
         parse_input("/INSPECT  EDRIC", &view).unwrap(),
         Operation::Request {
             method: "act".into(),
-            params: json!({"intent":{"kind":"inspect","targetId":102}})
+            params: json!({"intent":{"kind":"inspect","targetId":102},"context":{"roomVisitId":"visit-1"}})
         }
     );
     for enabled in [false, true] {
@@ -369,4 +369,185 @@ fn command_picker_wraps_upward_and_downward() {
         ui.draft.text, choices[0].command,
         "Down from the last reaches the first"
     );
+}
+
+#[test]
+fn dotted_title_fits_cell_bounds_and_matches_readme() {
+    let full = ui::title(120, 24, true);
+    assert!(
+        full.iter()
+            .flat_map(|row| row.chars())
+            .any(|ch| ('\u{2801}'..='\u{28ff}').contains(&ch))
+    );
+    assert!(
+        full.iter()
+            .flat_map(|row| row.chars())
+            .all(|ch| ch == ' ' || ('\u{2800}'..='\u{28ff}').contains(&ch))
+    );
+    let readme = include_str!("../README.md");
+    let banner = readme
+        .strip_prefix("```text\n")
+        .unwrap()
+        .split_once("\n```\n")
+        .unwrap()
+        .0;
+    assert_eq!(full.join("\n"), banner);
+    for width in [0, 1, 4, 9, 20, 24, 28, 40, 68, 80, 120] {
+        for rows in [0, 1, 2, 3, 4, 8, 12, 24] {
+            for braille in [false, true] {
+                let title = ui::title(width, rows, braille);
+                assert!(title.len() <= rows);
+                assert!(
+                    title
+                        .iter()
+                        .all(|row| UnicodeWidthStr::width(row.as_str()) <= width)
+                );
+                if !braille {
+                    assert!(title.iter().all(|row| row.is_ascii()));
+                }
+            }
+        }
+    }
+    for (width, rows, braille) in [(80, 3, true), (80, 20, false), (9, 2, false)] {
+        assert_eq!(
+            ui::title(width, rows, braille)
+                .join(" ")
+                .split_whitespace()
+                .collect::<Vec<_>>(),
+            ["BELOW", "THE", "CROWN"]
+        );
+    }
+    assert!(
+        ui::title(28, 20, true).len() > full.len(),
+        "Narrow artwork stacks complete words"
+    );
+}
+
+#[test]
+fn joining_keeps_name_and_error_visible_with_title_and_resize() {
+    let draft = Draft {
+        text: "Wren".into(),
+        cursor: 4,
+    };
+    for braille in [false, true] {
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        for (width, height) in [(120, 40), (40, 18), (20, 8), (80, 24)] {
+            terminal.backend_mut().resize(width, height);
+            terminal
+                .resize(ratatui::layout::Rect::new(0, 0, width, height))
+                .unwrap();
+            terminal
+                .draw(|frame| ui::render_join(frame, &draft, "en", Some("Test error"), braille))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let row = |y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            };
+            assert!(row(height - 1).contains("Wren"));
+            assert!(row(height - 2).contains("Your name"));
+            assert!(row(height - 3).contains("Test error"));
+            if !braille {
+                assert!(
+                    !(0..height)
+                        .flat_map(|y| row(y).chars().collect::<Vec<_>>())
+                        .any(|ch| ('\u{2800}'..='\u{28ff}').contains(&ch))
+                );
+            }
+        }
+    }
+}
+
+fn door_menu_view() -> Value {
+    let mut view = view();
+    view["actions"] = json!([
+        {"command":"/go Corridor","label":"go Corridor","intent":{"kind":"move","doorId":201},"available":false,"status":"locked","hint":"locked","reason":"The door is locked. Unlock it first."},
+        {"command":"/go Kitchen","label":"go Kitchen","intent":{"kind":"move","doorId":202},"available":false,"status":"closed","hint":"closed"},
+        {"command":"/go Courtyard","label":"go Courtyard","intent":{"kind":"move","doorId":203},"available":true,"status":"open","hint":"open"}
+    ]);
+    view["doors"] = json!([
+        {"id":201,"name":"Iron door","destination":"Corridor","open":false,"locked":true},
+        {"id":202,"name":"Wooden door","destination":"Kitchen","open":false,"locked":false},
+        {"id":203,"name":"Archway","destination":"Courtyard","open":true,"locked":false}
+    ]);
+    view
+}
+
+#[test]
+fn blocked_exits_are_discoverable_and_completion_submits_only_the_command() {
+    let view = door_menu_view();
+    let choices = suggestions("/go", &view);
+    assert_eq!(choices.len(), 3);
+    assert_eq!(choices[0].status, "locked");
+    let mut ui = PlayerUi::new(false);
+    ui.set_view(view);
+    ui.draft.set("/go".into());
+    ui.input(key(KeyCode::Tab));
+    assert_eq!(ui.draft.text, "/go Corridor");
+    let submission = ui.input(key(KeyCode::Enter)).unwrap();
+    let Operation::Request { method, params } = &submission.operation else {
+        panic!()
+    };
+    assert_eq!(method, "act");
+    assert_eq!(params["intent"], json!({"kind":"move","doorId":201}));
+    assert_eq!(params["context"], json!({"roomVisitId":"visit-1"}));
+    ui.finish(
+        &submission,
+        Ok(json!({"ok":false,"message":"The door is locked. Unlock it first."})),
+    );
+    assert_eq!(ui.draft.text, "/go Corridor");
+    assert!(screen(&mut ui, 80, 24).contains("Unlock it first."));
+}
+
+#[test]
+fn door_states_use_distinct_colors_in_suggestions_and_look() {
+    for look in [false, true] {
+        let mut ui = PlayerUi::new(false);
+        ui.set_view(door_menu_view());
+        ui.draft.set(if look { "/look" } else { "/go" }.into());
+        if look {
+            ui.input(key(KeyCode::Enter));
+        }
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|frame| ui.render(frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+        for (destination, status, color) in [
+            ("Corridor", "locked", ui::BLOOD),
+            ("Kitchen", "closed", ui::AMBER),
+            ("Courtyard", "open", ui::SAGE),
+        ] {
+            let (y, line) = (0..30)
+                .map(|y| {
+                    (
+                        y,
+                        (0..100)
+                            .map(|x| buffer[(x, y)].symbol())
+                            .collect::<String>(),
+                    )
+                })
+                .find(|(_, line)| line.contains(destination) && line.contains(status))
+                .unwrap();
+            let x = UnicodeWidthStr::width(&line[..line.rfind(status).unwrap()]) as u16;
+            assert_eq!(buffer[(x, y)].fg, color);
+            if !look {
+                let x = UnicodeWidthStr::width(&line[..line.find("/go").unwrap()]) as u16;
+                assert_eq!(buffer[(x, y)].fg, ui::BLUE);
+            }
+        }
+    }
+}
+
+#[test]
+fn refreshed_door_state_changes_the_hint_without_losing_the_draft() {
+    let mut ui = PlayerUi::new(false);
+    let mut view = door_menu_view();
+    ui.set_view(view.clone());
+    ui.draft.set("/go".into());
+    view["actions"][0]["available"] = json!(true);
+    view["actions"][0]["status"] = json!("open");
+    view["actions"][0]["hint"] = json!("open");
+    ui.set_view(view.clone());
+    assert_eq!(ui.draft.text, "/go");
+    assert_eq!(suggestions("/go", &view)[0].status, "open");
 }

@@ -752,6 +752,24 @@ impl Engine {
         urgent: bool,
         invalidate: bool,
     ) -> Result<()> {
+        self.queue_decision(
+            id,
+            reason,
+            if urgent {
+                WakePriority::Danger
+            } else {
+                WakePriority::Routine
+            },
+            invalidate,
+        )
+    }
+    fn queue_decision(
+        &mut self,
+        id: u16,
+        reason: String,
+        priority: WakePriority,
+        invalidate: bool,
+    ) -> Result<()> {
         let actor = self.actor(id)?;
         if self.is_player(id)
             || !actor.awake()
@@ -773,25 +791,26 @@ impl Engine {
         {
             return Ok(());
         }
-        let prior = self.wakes.get(&id).cloned();
         let actor = self.actor_mut(id)?;
         if invalidate {
             actor.invalidate_decision()?;
-            if urgent {
+            if priority == WakePriority::Danger {
                 actor.activity = None;
                 actor.plan.clear();
             }
         }
         let version = actor.decision_version;
-        self.wakes.insert(
-            id,
-            Wake {
-                actor_id: id,
-                reason,
-                urgent: urgent || prior.is_some_and(|wake| wake.urgent),
-                version,
-            },
-        );
+        let wake = Wake {
+            actor_id: id,
+            reason,
+            priority,
+            version,
+        };
+        if let Some(prior) = self.wakes.get_mut(&id) {
+            prior.merge(wake);
+        } else {
+            self.wakes.insert(id, wake);
+        }
         Ok(())
     }
     pub fn initialize_minds(&mut self) -> Result<()> {
@@ -986,11 +1005,19 @@ impl Engine {
         }
         let error = match intent {
             Intent::Move { .. } | Intent::Flee { .. }
+                if door.is_some_and(|d| d.flags & LOCKED != 0) =>
+            {
+                Some((
+                    "The door is locked. Unlock it with a matching key before passing.",
+                    "Drzwi są zamknięte na klucz. Odblokuj je pasującym kluczem, zanim przejdziesz.",
+                ))
+            }
+            Intent::Move { .. } | Intent::Flee { .. }
                 if door.is_none_or(|d| d.flags & OPEN == 0) =>
             {
                 Some((
-                    "The door must be open before you can pass.",
-                    "Drzwi muszą być otwarte, aby przejść.",
+                    "The door is closed. Open it before passing.",
+                    "Drzwi są zamknięte. Otwórz je, zanim przejdziesz.",
                 ))
             }
             Intent::Escort { target_id, .. }
@@ -1008,13 +1035,7 @@ impl Engine {
                 "Otwórz drzwi, zanim kogoś przez nie przeprowadzisz.",
             )),
             Intent::Unlock { .. } | Intent::Lock { .. }
-                if door.is_none_or(|d| {
-                    d.lock.is_none()
-                        || !self
-                            .inventory(id)
-                            .iter()
-                            .any(|i| i.kind == ItemKind::Key && i.key == d.lock)
-                }) =>
+                if door.is_none_or(|d| !self.has_key(id, d)) =>
             {
                 Some((
                     "You need a matching key in your possession.",
@@ -1025,9 +1046,10 @@ impl Engine {
                 "Close the door before locking it.",
                 "Zamknij drzwi, zanim przekręcisz klucz.",
             )),
-            Intent::Open { .. } if door.is_some_and(|d| d.flags & LOCKED != 0) => {
-                Some(("The door is locked.", "Drzwi są zamknięte na klucz."))
-            }
+            Intent::Open { .. } if door.is_some_and(|d| d.flags & LOCKED != 0) => Some((
+                "The door is locked. Unlock it with a matching key before opening it.",
+                "Drzwi są zamknięte na klucz. Odblokuj je pasującym kluczem, zanim je otworzysz.",
+            )),
             Intent::Take { .. }
                 if item.is_some_and(|i| {
                     i.owner_id
@@ -1373,24 +1395,40 @@ impl Engine {
             Ok(intent) => intent,
             Err(error) => return Ok(ActionResult::fail(error.to_string()).value()),
         };
-        let actor = self.actor(id)?;
-        if actor.activity.as_ref().is_some_and(|a| !a.intent.long())
-            && !matches!(
-                intent,
-                Intent::Speak { .. }
-                    | Intent::Inspect { .. }
-                    | Intent::Defend { .. }
-                    | Intent::Flee { .. }
-            )
-        {
-            return Ok(ActionResult::fail(self.text(
-                "Finish your current action first, or defend/flee to interrupt it.",
-                "Dokończ bieżące działanie albo przerwij je obroną lub ucieczką.",
-            ))
-            .value());
+        if let Err(error) = self.check_busy(id, &intent) {
+            return Ok(ActionResult::fail(error.to_string()).value());
         }
         self.mutate(|s| s.begin(id, intent, causes))
             .map(ActionResult::value)
+    }
+    fn has_key(&self, id: u16, door: &Door) -> bool {
+        door.lock.is_some()
+            && self
+                .inventory(id)
+                .iter()
+                .any(|item| item.kind == ItemKind::Key && item.key == door.lock)
+    }
+    fn check_busy(&self, id: u16, intent: &Intent) -> Result<()> {
+        ensure!(
+            !self
+                .actor(id)?
+                .activity
+                .as_ref()
+                .is_some_and(|a| !a.intent.long())
+                || matches!(
+                    intent,
+                    Intent::Speak { .. }
+                        | Intent::Inspect { .. }
+                        | Intent::Defend { .. }
+                        | Intent::Flee { .. }
+                ),
+            "{}",
+            self.text(
+                "Finish your current action first, or defend/flee to interrupt it.",
+                "Dokończ bieżące działanie albo przerwij je obroną lub ucieczką.",
+            )
+        );
+        Ok(())
     }
     fn begin(&mut self, id: u16, intent: Intent, causes: Vec<u64>) -> Result<ActionResult> {
         if matches!(intent, Intent::Speak { .. } | Intent::Inspect { .. }) {
@@ -3606,7 +3644,20 @@ impl Engine {
                         projected.text
                     ),
                 );
-                self.request_decision(listener, reason, false, false)?;
+                let priority =
+                    if self.is_player(id) || target == Some(listener) || volume == Volume::Shout {
+                        WakePriority::Conversation
+                    } else {
+                        WakePriority::Routine
+                    };
+                // Hearing a direct conversation invalidates an older observation,
+                // without cancelling the physical activity it described.
+                self.queue_decision(
+                    listener,
+                    reason,
+                    priority,
+                    priority == WakePriority::Conversation,
+                )?;
             }
         }
         Ok(ActionResult {
@@ -3741,10 +3792,14 @@ impl Engine {
                     let Some(activity) = activity else {
                         continue;
                     };
-                    if s.actor(actor_id)?.awake() {
-                        s.execute(actor_id, activity.intent, activity.causes.clone())?;
-                    }
-                    s.run_plan(actor_id, activity.causes)?;
+                    let failure = if s.actor(actor_id)?.awake() {
+                        let result =
+                            s.execute(actor_id, activity.intent, activity.causes.clone())?;
+                        (!result.ok).then_some(result.message)
+                    } else {
+                        None
+                    };
+                    s.run_plan(actor_id, activity.causes, failure)?;
                 }
                 let encounters: Vec<_> = s.world.encounters.iter().map(|e| e.id.clone()).collect();
                 for encounter in encounters {
@@ -3885,7 +3940,7 @@ impl Engine {
         }
         Ok(())
     }
-    fn run_plan(&mut self, id: u16, causes: Vec<u64>) -> Result<()> {
+    fn run_plan(&mut self, id: u16, causes: Vec<u64>, mut failure: Option<String>) -> Result<()> {
         let mut steps = 0;
         while !self.actor(id)?.plan.is_empty()
             && self.actor(id)?.activity.is_none()
@@ -3896,6 +3951,7 @@ impl Engine {
             ensure!(steps <= 6, "Action plan exceeded its maximum length.");
             let intent = self.actor_mut(id)?.plan.remove(0);
             if let Err(error) = self.validate_intent(id, &intent) {
+                failure = Some(error.to_string());
                 self.actor_mut(id)?.plan.clear();
                 let room = self.actor(id)?.room_id;
                 self.record(
@@ -3912,7 +3968,12 @@ impl Engine {
                 )?;
                 break;
             }
-            self.begin(id, intent, causes.clone())?;
+            let result = self.begin(id, intent, causes.clone())?;
+            if !result.ok {
+                failure = Some(result.message);
+                self.actor_mut(id)?.plan.clear();
+                break;
+            }
             if self.encounter(id).is_some() {
                 break;
             }
@@ -3923,9 +3984,12 @@ impl Engine {
         {
             self.request_decision(
                 id,
-                self.text(
-                    "Your planned activity has ended.",
-                    "Twoje zaplanowane zajęcie dobiegło końca.",
+                failure.map_or_else(
+                    || self.text("Your planned activity has ended.", "Twoje zaplanowane zajęcie dobiegło końca."),
+                    |error| self.text(
+                        &format!("Your plan stopped: {error} Choose a legal action using current facts."),
+                        &format!("Twój plan został przerwany: {error} Wybierz legalne działanie na podstawie aktualnych faktów."),
+                    ),
                 ),
                 false,
                 false,
@@ -4029,7 +4093,7 @@ impl Engine {
                 };
             let result = s.begin(id, first, vec![source_id])?;
             if s.actor(id)?.activity.is_none() {
-                s.run_plan(id, vec![source_id])?;
+                s.run_plan(id, vec![source_id], None)?;
             }
             Ok(result)
         })
@@ -4063,13 +4127,6 @@ impl Engine {
             return Ok(ActionResult::fail(self.text(
                 "That decision belongs to an obsolete situation.",
                 "Ta decyzja dotyczy nieaktualnej sytuacji.",
-            ))
-            .value());
-        }
-        if actor.activity.as_ref().is_some_and(|a| a.intent.travel()) {
-            return Ok(ActionResult::fail(self.text(
-                "Finish travelling before choosing another activity.",
-                "Dokończ przejście, zanim wybierzesz inne zajęcie.",
             ))
             .value());
         }
@@ -4141,11 +4198,18 @@ impl Engine {
             .activity
             .as_ref()
             .is_some_and(|activity| !activity.intent.long());
-        let preserve_activity = busy
+        let preserve_activity = actor.activity.is_some()
             && decision
                 .plan
                 .iter()
                 .all(|intent| matches!(intent, Intent::Speak { .. } | Intent::Inspect { .. }));
+        if !preserve_activity && actor.activity.as_ref().is_some_and(|a| a.intent.travel()) {
+            return Ok(ActionResult::fail(self.text(
+                "Finish travelling before choosing another activity.",
+                "Dokończ przejście, zanim wybierzesz inne zajęcie.",
+            ))
+            .value());
+        }
         let interruption = decision
             .plan
             .iter()
@@ -4279,7 +4343,7 @@ impl Engine {
                 }
                 s.begin(id, physical[0].clone(), vec![])?;
             } else {
-                s.run_plan(id, vec![])?;
+                s.run_plan(id, vec![], None)?;
             }
             Ok(ActionResult::ok(s.text(
                 "The character’s decision is accepted.",
@@ -4311,7 +4375,12 @@ impl Engine {
                 .collect::<Vec<_>>()
                 .join(" ")
         );
-        let memories = self.store.recall(id, &query, 24)?;
+        let mut memories = self.store.recall(id, &query, 24)?;
+        let dialogue = self.store.recent_dialogue(id, 8, 4)?;
+        memories.retain(|memory| !dialogue.iter().any(|heard| heard.id == memory.id));
+        let mut evidence: Vec<_> = memories.iter().chain(&dialogue).map(|m| m.id).collect();
+        evidence.sort_unstable();
+        evidence.dedup();
         let doors = self.door_views(id)?;
         let items=self.visible_items(id)?.iter().map(|item|{
             let mut value=json!({"id":item.id,"name":self.name(item.id),"description":self.authored(&item.description),"kind":item.kind,"quantity":item.quantity,"ownerId":item.owner_id,"equipped":item.equipped,"poisonRecognized":item.poisoned_by.is_some() && (item.poisoned_by==Some(id) || actor.skills.medicine>=60.0)});
@@ -4340,7 +4409,7 @@ impl Engine {
             })
             .collect::<Vec<_>>();
         Ok(
-            json!({"context":{"branch":self.world.branch,"version":actor.decision_version,"evidenceIds":memories.iter().map(|m|m.id).collect::<Vec<_>>(),"combat":self.combat_context(id)},"input":{"language":self.language,"scenarioId":self.world.scenario_id,"time":self.world.time,"reason":reason,"combat":self.combat_view(id)?,"speechRule":if self.world.mode=="multiplayer"{"Normal speech stays in this room. Shouts reach adjoining rooms, with partially heard words. Never whisper."}else{"Speech follows normal, whisper and shout perception."},"self":{"id":id,"name":described["name"],"aliases":if self.is_player(id){vec![]}else{self.content.aliases(id)},"role":described["role"],"biography":described["biography"],"personality":described["personality"],"health":actor.health,"hunger":actor.hunger,"thirst":actor.thirst,"fatigue":actor.fatigue,"coins":actor.coins,"skills":actor.skills,"condition":self.condition(actor),"goals":described["goals"],"relationships":actor.relationships,"lastSummary":described["summary"],"activity":self.activity_text(actor)},"room":self.describe_room(actor.room_id)?,"doors":doors,"people":people,"items":items,"knownPeople":known_people,"knownMap":known_map,"offers":self.world.offers.iter().filter(|o|o.to==id && o.status=="open" && !self.offer_expired(o)).collect::<Vec<_>>(),"plots":plots,"memories":memories.iter().map(|m|self.describe_memory(m)).collect::<Vec<_>>(),"recipes":[{"recipe":"meal","roomId":4,"skill":"craft","minimum":20,"consumes":"ingredient"},{"recipe":"lockpick","roomId":8,"skill":"craft","minimum":25,"consumes":"metal"},{"recipe":"medicine","roomId":7,"skill":"medicine","minimum":50,"consumes":"herb"}]}}),
+            json!({"context":{"branch":self.world.branch,"version":actor.decision_version,"evidenceIds":evidence,"combat":self.combat_context(id)},"input":{"language":self.language,"scenarioId":self.world.scenario_id,"time":self.world.time,"timeRules":{"calendarSecondsPerRealSecond":CLOCK_RATE,"activitySecondsAre":"calendar","reactionSchedulingUses":"real seconds"},"reason":reason,"combat":self.combat_view(id)?,"speechRule":if self.world.mode=="multiplayer"{"Normal speech stays in this room. Shouts reach adjoining rooms, with partially heard words. Never whisper."}else{"Speech follows normal, whisper and shout perception."},"self":{"id":id,"name":described["name"],"aliases":if self.is_player(id){vec![]}else{self.content.aliases(id)},"role":described["role"],"biography":described["biography"],"personality":described["personality"],"health":actor.health,"hunger":actor.hunger,"thirst":actor.thirst,"fatigue":actor.fatigue,"coins":actor.coins,"skills":actor.skills,"condition":self.condition(actor),"goals":described["goals"],"relationships":actor.relationships,"lastSummary":described["summary"],"activity":self.activity_text(actor)},"room":self.describe_room(actor.room_id)?,"doors":doors,"people":people,"items":items,"knownPeople":known_people,"knownMap":known_map,"offers":self.world.offers.iter().filter(|o|o.to==id && o.status=="open" && !self.offer_expired(o)).collect::<Vec<_>>(),"plots":plots,"memories":memories.iter().map(|m|self.describe_memory(m)).collect::<Vec<_>>(),"recentDialogue":dialogue.iter().map(|m|self.describe_memory(m)).collect::<Vec<_>>(),"recipes":[{"recipe":"meal","roomId":4,"skill":"craft","minimum":20,"consumes":"ingredient"},{"recipe":"lockpick","roomId":8,"skill":"craft","minimum":25,"consumes":"metal"},{"recipe":"medicine","roomId":7,"skill":"medicine","minimum":50,"consumes":"herb"}]}}),
         )
     }
 
@@ -4536,7 +4605,21 @@ impl Engine {
         group: &str,
         polish_group: &str,
     ) -> Option<Value> {
-        self.validate_intent(id, &intent).ok()?;
+        let readiness = self
+            .validate_intent(id, &intent)
+            .and_then(|()| self.check_busy(id, &intent));
+        let door_command = matches!(
+            intent,
+            Intent::Move { .. }
+                | Intent::Open { .. }
+                | Intent::Close { .. }
+                | Intent::Unlock { .. }
+                | Intent::Lock { .. }
+        );
+        if readiness.is_err() && !door_command {
+            return None;
+        }
+        let available = readiness.is_ok();
         let command = self.action_command(id, &intent);
         let label = if self.language == "pl" {
             let mut label = self.action_verb(&intent);
@@ -4556,9 +4639,45 @@ impl Engine {
         } else {
             command.trim_start_matches('/').into()
         };
-        Some(
-            json!({"label":label,"group":self.text(group,polish_group),"intent":intent,"command":command}),
-        )
+        let mut choice = json!({"label":label,"group":self.text(group,polish_group),
+            "intent":intent,"command":command,"available":available});
+        if door_command {
+            let door = self.door(intent.door_id()?)?;
+            let actor = self.actor(id).ok()?;
+            let (status, en, pl) = if !available
+                && (!actor.awake()
+                    || self.world.ending != "playing"
+                    || actor.flags & RESTRAINED != 0
+                    || self.encounter(id).is_some()
+                    || self.check_busy(id, &intent).is_err())
+            {
+                ("blocked", "blocked", "niedostępne")
+            } else if matches!(intent, Intent::Unlock { .. } | Intent::Lock { .. })
+                && !self.has_key(id, door)
+            {
+                (
+                    "needs_key",
+                    "needs matching key",
+                    "wymaga pasującego klucza",
+                )
+            } else if matches!(intent, Intent::Lock { .. }) && door.flags & OPEN != 0 {
+                ("close_first", "close first", "najpierw zamknij")
+            } else if matches!(intent, Intent::Unlock { .. }) && available {
+                ("ready", "ready", "gotowe")
+            } else if door.flags & LOCKED != 0 {
+                ("locked", "locked", "zamknięte na klucz")
+            } else if door.flags & OPEN != 0 {
+                ("open", "open", "otwarte")
+            } else {
+                ("closed", "closed", "zamknięte")
+            };
+            choice["status"] = json!(status);
+            choice["hint"] = json!(self.text(en, pl));
+            if let Err(error) = readiness {
+                choice["reason"] = json!(error.to_string());
+            }
+        }
+        Some(choice)
     }
     pub fn actions(&self, id: u16) -> Result<Vec<Value>> {
         let actor = self.actor(id)?;
