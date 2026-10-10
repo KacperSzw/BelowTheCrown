@@ -33,11 +33,15 @@ prevents wall-clock edits from moving the castle. No offline catch-up occurs.
 Travel, combat deadlines and recovery use interaction time rather than the
 accelerated calendar.
 
-Routine speech is collected before thinking; repeated wakes merge. Physical
-danger preempts routine cooldowns. Priorities use current player locations,
-share attention among occupied rooms and age background requests. Four calls
-can run concurrently; background work cannot consume all reaction capacity.
-Ongoing activities progress in the engine without a fresh model call each tick.
+Events start thinking as soon as capacity is available, without batching delays
+or per-character cooldowns. Pending wakes merge, and new player speech cancels
+obsolete answers. Danger and conversations take priority over routine work.
+Priorities use current player locations, share attention among occupied rooms
+and age background requests. Four calls can run concurrently; background work
+cannot consume all reaction capacity. Each character has at most one active
+decision, and a rejected decision gets one immediate correction attempt.
+Idle characters are reconsidered every 30 real seconds. Ongoing activities
+progress in the engine without a fresh model call each tick.
 
 ## Hearing
 

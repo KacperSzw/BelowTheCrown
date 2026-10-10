@@ -22,8 +22,6 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone, Debug)]
 pub struct Scheduling {
     pub maximum_calls: usize,
-    pub speech_batch: f64,
-    pub routine_cooldown: f64,
     pub background_interval: f64,
     pub aging: f64,
     pub timeout: Duration,
@@ -32,8 +30,6 @@ impl Default for Scheduling {
     fn default() -> Self {
         Self {
             maximum_calls: 4,
-            speech_batch: 2.,
-            routine_cooldown: 15.,
             background_interval: 30.,
             aging: 30.,
             timeout: Duration::from_secs(120),
@@ -46,7 +42,6 @@ struct Queued {
     wake: Wake,
     order: u64,
     created: f64,
-    ready: f64,
     attempt: u8,
     feedback: Option<String>,
 }
@@ -114,7 +109,6 @@ pub struct Simulation {
     deferred: VecDeque<Completion>,
     messages: VecDeque<Message>,
     statuses: HashMap<(u16, bool), Status>,
-    last_started: HashMap<u16, f64>,
     room_last: HashMap<u16, u64>,
     sequence: u64,
     wall: f64,
@@ -198,7 +192,6 @@ impl Simulation {
             deferred: VecDeque::new(),
             messages: VecDeque::new(),
             statuses: HashMap::new(),
-            last_started: HashMap::new(),
             room_last: HashMap::new(),
             sequence: 0,
             wall: 0.,
@@ -293,20 +286,11 @@ impl Simulation {
             if let Some(queued) = self.queued.get_mut(&id) {
                 let new_conversation = wake.priority == WakePriority::Conversation;
                 queued.wake.merge(wake);
-                if queued.wake.priority != WakePriority::Routine {
-                    queued.ready = self.wall;
-                }
                 if new_conversation {
                     queued.attempt = 0;
                     queued.feedback = None;
                 }
             } else {
-                let ready = self.wall
-                    + if wake.priority != WakePriority::Routine {
-                        0.
-                    } else {
-                        self.scheduling.speech_batch
-                    };
                 let order = self.next();
                 self.queued.insert(
                     id,
@@ -314,7 +298,6 @@ impl Simulation {
                         wake,
                         order,
                         created: self.wall,
-                        ready,
                         attempt: 0,
                         feedback: None,
                     },
@@ -375,21 +358,11 @@ impl Simulation {
             for (id, q) in &self.queued {
                 if self.jobs.contains_key(&(*id, false))
                     || self.inflight.values().any(|key| *key == (*id, false))
-                    || self.wall < q.ready
                 {
                     continue;
                 }
                 let danger = q.wake.urgent() || self.combat(*id).is_some();
                 let conversation = q.wake.priority == WakePriority::Conversation;
-                if !danger
-                    && !conversation
-                    && self
-                        .last_started
-                        .get(id)
-                        .is_some_and(|last| self.wall - *last < self.scheduling.routine_cooldown)
-                {
-                    continue;
-                }
                 let foreground = self.foreground(*id);
                 let aged = self.wall - q.created >= self.scheduling.aging;
                 if !foreground
@@ -488,7 +461,6 @@ impl Simulation {
         };
         let room = self.engine.actor(actor)?.room_id;
         self.room_last.insert(room, id);
-        self.last_started.insert(actor, self.wall);
         self.jobs.insert((actor, false), job);
         let status = self.statuses.entry((actor, false)).or_default();
         status.calls += 1;
@@ -645,12 +617,6 @@ impl Simulation {
                 if let Some(mut q) = job.queued.filter(|q| q.attempt < 1) {
                     q.attempt += 1;
                     q.feedback = Some(error);
-                    q.ready = self.wall
-                        + if q.wake.priority == WakePriority::Routine {
-                            self.scheduling.routine_cooldown
-                        } else {
-                            0.
-                        };
                     self.queued.insert(job.actor, q);
                 }
             }
@@ -1000,7 +966,6 @@ impl Simulation {
         self.engine.set_pause(true)?;
         self.error = None;
         self.statuses.clear();
-        self.last_started.clear();
         self.room_last.clear();
         self.last_idle = self.wall;
         self.engine.initialize_minds()?;
@@ -1287,7 +1252,6 @@ mod tests {
                 },
                 order,
                 created,
-                ready: sim.wall,
                 attempt: 0,
                 feedback: None,
             },
@@ -1320,11 +1284,9 @@ mod tests {
     async fn player_speech_supersedes_inflight_routine_and_conversation_answers() {
         let (mut sim, mut requests, _) = fixture();
         sim.scheduling.maximum_calls = 1;
-        sim.scheduling.routine_cooldown = 40.;
-        sim.scheduling.speech_batch = 3.;
         let player = sim.join(None, "Fixture Guest".into()).unwrap();
         only(&mut sim, &[102]);
-        sim.tick(3.).unwrap();
+        sim.pump().unwrap();
         let (_, routine) = started(&mut requests).await;
         let stale = sim.jobs[&(102, false)].cancel.clone();
         routine.send(Ok(decision(json!([
@@ -1356,8 +1318,8 @@ mod tests {
         let (latest, reply) = started(&mut requests).await;
         assert!(latest.input["reason"].as_str().unwrap().contains("Halina"));
         assert_eq!(
-            sim.wall, 3.,
-            "Conversation starts without waiting for routine cooldown or batching"
+            sim.wall, 0.,
+            "Fresh conversation starts as soon as obsolete work releases its slot"
         );
         reply.send(Ok(decision(json!([
             {"kind":"speak","text":"Halina? The register says otherwise.","targetId":null,"volume":"normal","plot":null},
@@ -1378,24 +1340,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn routine_starts_respect_test_owned_cooldown_values() {
-        for cooldown in [3., 7.] {
+    async fn routine_decisions_start_and_repeat_without_advancing_the_clock() {
+        for started_at in [0., 7.25] {
             let (mut sim, mut requests, _) = fixture();
-            sim.scheduling.routine_cooldown = cooldown;
+            sim.scheduling.maximum_calls = 1;
             sim.join(None, "Fixture Guest".into()).unwrap();
             only(&mut sim, &[102]);
-            sim.tick(2.).unwrap();
-            let (_, reply) = started(&mut requests).await;
-            reply
-                .send(Ok(decision(json!([{"kind":"wait","seconds":1800}]))))
-                .unwrap();
-            finish(&mut sim).await;
-            sim.engine.wake_idle(102).unwrap();
-            sim.collect();
-            sim.tick(cooldown - 0.01).unwrap();
-            assert!(requests.try_recv().is_err());
-            sim.tick(0.02).unwrap();
-            assert_eq!(started(&mut requests).await.0.actor_id, 102);
+            sim.tick(started_at).unwrap();
+            let (request, mut reply) = started(&mut requests).await;
+            assert_eq!(request.actor_id, 102);
+            for _ in 0..2 {
+                reply
+                    .send(Ok(decision(json!([{"kind":"wait","seconds":1800}]))))
+                    .unwrap();
+                finish(&mut sim).await;
+                sim.engine.wake_idle(102).unwrap();
+                sim.pump().unwrap();
+                let (request, next_reply) = started(&mut requests).await;
+                assert_eq!(request.actor_id, 102);
+                assert_eq!(sim.wall, started_at);
+                assert_eq!(sim.inflight.len(), 1);
+                reply = next_reply;
+            }
             sim.cancel_all();
         }
     }
@@ -1438,38 +1404,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn world_calendar_cannot_bypass_real_routine_cooldown_but_speech_can() {
-        for cooldown in [9., 17.] {
+    async fn physical_completion_can_start_thinking_without_advancing_scheduler_time() {
+        for seconds in [240, 960] {
             let (mut sim, mut requests, _) = fixture();
             sim.scheduling.maximum_calls = 1;
-            sim.scheduling.routine_cooldown = cooldown;
-            let player = sim.join(None, "Fixture Guest".into()).unwrap();
+            sim.join(None, "Fixture Guest".into()).unwrap();
             only(&mut sim, &[102]);
-            sim.tick(2.).unwrap();
+            sim.pump().unwrap();
             let (_, reply) = started(&mut requests).await;
             reply
-                .send(Ok(decision(json!([{"kind":"guard","seconds":600}]))))
+                .send(Ok(decision(json!([{"kind":"guard","seconds":seconds}]))))
                 .unwrap();
             finish(&mut sim).await;
             let real = sim.wall;
             let calendar = sim.engine.world.time;
-            sim.engine.advance(600. / crate::model::CLOCK_RATE).unwrap();
-            assert!((sim.engine.world.time - calendar - 600.).abs() < 1e-7);
+            sim.engine
+                .advance(f64::from(seconds) / crate::model::CLOCK_RATE)
+                .unwrap();
+            assert!((sim.engine.world.time - calendar - f64::from(seconds)).abs() < 1e-7);
             assert_eq!(sim.wall, real);
             sim.pump().unwrap();
-            assert!(requests.try_recv().is_err());
-            sim.tick(cooldown - 0.1).unwrap();
-            assert!(requests.try_recv().is_err());
-            sim.player_request(player.actor_id, "input", json!({"text":"Who are you?"}))
-                .unwrap();
-            sim.pump().unwrap();
             let (request, _) = started(&mut requests).await;
-            assert!(
-                request.input["reason"]
-                    .as_str()
-                    .unwrap()
-                    .contains("Who are you?")
-            );
+            assert_eq!(request.actor_id, 102);
+            assert_eq!(sim.wall, real);
+            assert!(sim.engine.actor(102).unwrap().activity.is_none());
             sim.cancel_all();
         }
     }
@@ -1489,6 +1447,26 @@ mod tests {
         assert!(sim.jobs.contains_key(&(102, false)));
         assert!(requests.try_recv().is_err());
         sim.cancel_all();
+    }
+
+    #[tokio::test]
+    async fn idle_refresh_starts_thinking_as_soon_as_its_interval_elapses() {
+        for interval in [1., 7.] {
+            let (mut sim, mut requests, _) = fixture();
+            sim.scheduling.maximum_calls = 1;
+            sim.scheduling.background_interval = interval;
+            sim.join(None, "Fixture Guest".into()).unwrap();
+            sim.collect();
+            sim.queued.clear();
+            sim.tick(interval / 2.).unwrap();
+            assert!(requests.try_recv().is_err());
+            assert!(sim.inflight.is_empty());
+            sim.tick(interval / 2.).unwrap();
+            assert_eq!(started(&mut requests).await.0.actor_id, 102);
+            assert_eq!(sim.wall, interval);
+            assert_eq!(sim.inflight.len(), 1);
+            sim.cancel_all();
+        }
     }
 
     #[tokio::test]
@@ -1528,7 +1506,6 @@ mod tests {
     async fn conversational_validation_failure_gets_one_immediate_correction() {
         let (mut sim, mut requests, _) = fixture();
         sim.scheduling.maximum_calls = 1;
-        sim.scheduling.routine_cooldown = 50.;
         let player = sim.join(None, "Fixture Guest".into()).unwrap();
         only(&mut sim, &[102]);
         sim.player_request(
@@ -1548,9 +1525,213 @@ mod tests {
         assert_eq!(sim.wall, 0.);
         second.send(Ok(decision(bad))).unwrap();
         finish(&mut sim).await;
+        sim.pump().unwrap();
         assert!(!sim.queued.contains_key(&102));
+        assert!(sim.inflight.is_empty());
+        assert!(requests.try_recv().is_err());
         assert_eq!(sim.statuses[&(102, false)].state, "failed");
+        assert_eq!(sim.statuses[&(102, false)].calls, 2);
         sim.cancel_all();
+    }
+
+    #[tokio::test]
+    async fn routine_validation_failure_gets_one_immediate_correction() {
+        let (mut sim, mut requests, _) = fixture();
+        sim.scheduling.maximum_calls = 1;
+        sim.join(None, "Fixture Guest".into()).unwrap();
+        only(&mut sim, &[102]);
+        sim.pump().unwrap();
+        let (_, first) = started(&mut requests).await;
+        let bad = json!([{"kind":"take","itemId":1001}]);
+        first.send(Ok(decision(bad.clone()))).unwrap();
+        finish(&mut sim).await;
+        sim.pump().unwrap();
+        let (retry, second) = started(&mut requests).await;
+        assert_eq!(retry.actor_id, 102);
+        assert!(retry.input["reason"].as_str().unwrap().contains("rejected"));
+        assert_eq!(sim.wall, 0.);
+        second.send(Ok(decision(bad))).unwrap();
+        finish(&mut sim).await;
+        sim.pump().unwrap();
+        assert!(sim.queued.is_empty());
+        assert!(sim.inflight.is_empty());
+        assert!(requests.try_recv().is_err());
+        assert_eq!(sim.statuses[&(102, false)].state, "failed");
+        assert_eq!(sim.statuses[&(102, false)].calls, 2);
+        sim.cancel_all();
+    }
+
+    #[tokio::test]
+    async fn three_room_npcs_and_an_enabled_listener_can_think_concurrently() {
+        for auto in [false, true] {
+            let (mut sim, mut requests, _) = fixture();
+            sim.scheduling.maximum_calls = 4;
+            let player = sim.join(None, "Fixture Guest".into()).unwrap();
+            let room = sim.engine.actor(player.actor_id).unwrap().room_id;
+            let npcs = [102, 103, 104];
+            for id in npcs {
+                sim.engine.actor_mut(id).unwrap().room_id = room;
+            }
+            sim.queued.clear();
+            sim.player_request(player.actor_id, "listener", json!({"enabled":auto}))
+                .unwrap();
+            sim.player_request(
+                player.actor_id,
+                "input",
+                json!({"text":"Who runs this room?"}),
+            )
+            .unwrap();
+            sim.pump().unwrap();
+            let calls = npcs.len() + usize::from(auto);
+            assert_eq!(sim.inflight.len(), calls);
+            assert_eq!(sim.jobs.len(), calls);
+            let mut requested_npcs = Vec::new();
+            let mut listener_calls = 0;
+            for _ in 0..calls {
+                let (request, reply) = started(&mut requests).await;
+                if request.listener {
+                    listener_calls += 1;
+                    assert_eq!(request.actor_id, player.actor_id);
+                    assert_eq!(request.input["text"], "Who runs this room?");
+                    reply.send(Ok(ThinkResult {
+                        decision: json!({"summary":"A question with no physical action.","plan":[]}),
+                        tokens: 10,
+                        latency_ms: 100.,
+                        recalled: vec![],
+                    })).unwrap();
+                } else {
+                    requested_npcs.push(request.actor_id);
+                    assert!(
+                        request.input["reason"]
+                            .as_str()
+                            .unwrap()
+                            .contains("Who runs this room?")
+                    );
+                    reply.send(Ok(decision(json!([
+                        {"kind":"speak","text":format!("Reply from {}.", request.actor_id),"targetId":null,"volume":"normal","plot":null},
+                        {"kind":"guard","seconds":600}
+                    ])))).unwrap();
+                }
+            }
+            requested_npcs.sort_unstable();
+            assert_eq!(requested_npcs, npcs);
+            assert_eq!(listener_calls, usize::from(auto));
+            assert!(requests.try_recv().is_err());
+            for _ in 0..calls {
+                finish(&mut sim).await;
+            }
+            let mut speakers: Vec<_> = sim
+                .engine
+                .store
+                .events(Some(player.actor_id), 100)
+                .unwrap()
+                .into_iter()
+                .filter(|event| {
+                    event.kind == "speech" && event.actor_id.is_some_and(|id| npcs.contains(&id))
+                })
+                .map(|event| event.actor_id.unwrap())
+                .collect();
+            speakers.sort_unstable();
+            assert_eq!(speakers, npcs);
+            assert_eq!(sim.wall, 0.);
+            sim.cancel_all();
+        }
+    }
+
+    #[tokio::test]
+    async fn ordinary_npc_speech_wakes_room_mates_without_a_delay() {
+        let (mut sim, mut requests, _) = fixture();
+        sim.scheduling.maximum_calls = 2;
+        let player = sim.join(None, "Fixture Guest".into()).unwrap();
+        let room = sim.engine.actor(player.actor_id).unwrap().room_id;
+        for id in [103, 104] {
+            sim.engine.actor_mut(id).unwrap().room_id = room;
+        }
+        sim.collect();
+        sim.queued.clear();
+        assert_eq!(
+            sim.engine
+                .dispatch(
+                    102,
+                    json!({
+                        "kind":"speak","text":"Has anyone seen the captain?",
+                        "targetId":null,"volume":"normal","plot":null
+                    }),
+                    vec![],
+                    None
+                )
+                .unwrap()["ok"],
+            true
+        );
+        sim.collect();
+        assert_eq!(sim.queued.len(), 2);
+        assert!(
+            sim.queued
+                .values()
+                .all(|q| q.wake.priority == WakePriority::Routine)
+        );
+        sim.pump().unwrap();
+        let mut actors = Vec::new();
+        let mut pending = Vec::new();
+        for _ in 0..2 {
+            let (request, reply) = started(&mut requests).await;
+            actors.push(request.actor_id);
+            assert!(
+                request.input["reason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Has anyone seen the captain?")
+            );
+            pending.push(reply);
+        }
+        actors.sort_unstable();
+        assert_eq!(actors, [103, 104]);
+        assert_eq!(sim.wall, 0.);
+        assert_eq!(sim.inflight.len(), 2);
+        sim.cancel_all();
+    }
+
+    #[tokio::test]
+    async fn a_freed_slot_starts_waiting_routine_work_without_advancing_time() {
+        for capacity in [1, 2] {
+            let (mut sim, mut requests, _) = fixture();
+            sim.scheduling.maximum_calls = capacity;
+            let player = sim.join(None, "Fixture Guest".into()).unwrap();
+            let room = sim.engine.actor(player.actor_id).unwrap().room_id;
+            let npcs = [102, 103, 104];
+            sim.queued.clear();
+            for id in npcs {
+                sim.engine.actor_mut(id).unwrap().room_id = room;
+                wake(&mut sim, id, 0., false);
+            }
+            sim.pump().unwrap();
+            let mut active = Vec::new();
+            for _ in 0..capacity {
+                active.push(started(&mut requests).await);
+            }
+            assert_eq!(sim.inflight.len(), capacity);
+            assert_eq!(sim.queued.len(), npcs.len() - capacity);
+            sim.pump().unwrap();
+            assert!(requests.try_recv().is_err());
+            let (finished, reply) = active.remove(0);
+            reply
+                .send(Ok(decision(json!([{"kind":"guard","seconds":600}]))))
+                .unwrap();
+            finish(&mut sim).await;
+            assert_eq!(sim.inflight.len(), capacity - 1);
+            sim.pump().unwrap();
+            let (next, _reply) = started(&mut requests).await;
+            assert_ne!(next.actor_id, finished.actor_id);
+            assert!(
+                active
+                    .iter()
+                    .all(|(request, _)| request.actor_id != next.actor_id)
+            );
+            assert_eq!(sim.inflight.len(), capacity);
+            assert_eq!(sim.queued.len(), npcs.len() - capacity - 1);
+            assert_eq!(sim.wall, 0.);
+            sim.cancel_all();
+        }
     }
 
     #[tokio::test]
@@ -1640,16 +1821,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn danger_bypasses_routine_batch_and_cooldown() {
+    async fn danger_precedes_older_routine_work() {
         let (mut sim, mut requests, _) = fixture();
-        sim.scheduling.routine_cooldown = 20.;
+        sim.scheduling.maximum_calls = 1;
         sim.join(None, "Fixture Guest".into()).unwrap();
         sim.queued.clear();
-        sim.last_started.insert(102, sim.wall);
+        sim.engine.actor_mut(103).unwrap().room_id = sim.engine.actor(102).unwrap().room_id;
         let now = sim.wall;
+        wake(&mut sim, 103, now, false);
         wake(&mut sim, 102, now, true);
         sim.pump().unwrap();
         assert_eq!(started(&mut requests).await.0.actor_id, 102);
+        assert!(sim.queued.contains_key(&103));
+        assert_eq!(sim.wall, now);
         sim.cancel_all();
     }
     #[tokio::test]
