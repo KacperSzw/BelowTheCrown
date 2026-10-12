@@ -27,7 +27,14 @@ that actor's own memory. Recall is bound to the active actor, branch, job and
 context generation. Evidence references distinguish events from inference; a
 reflection cannot become a fabricated witness account.
 
-Observations reserve recent verbatim dialogue separately from memory retrieval.
+Observations contain a room-visit chronology of the actor's own perceptions:
+at most 32 speech groups and eight public movement/injury/death entries, within
+16 KiB. Consecutive identical speech from a recognized speaker groups before
+these limits; first/last times, repeat counts and bounded owned memory evidence
+remain explicit. Unknown speakers and intervening events are not merged.
+Speaker names and addressing metadata are projected with the perceived words;
+legacy or distant unknown addressing remains unknown. Represented memory ranges
+are excluded from initial retrieval; explicit recall still searches the journal.
 The default memory budget selects six recent, ten relevant and eight important
 records, deduplicates them and refills unused slots. Relevant matching normalizes
 Unicode and scores distinct meaningful words within the actor's own records.
@@ -37,12 +44,57 @@ Ordinary greetings never create implicit assassination proposals. An NPC can
 accept a proposal through identified speech it actually heard, citing its own
 memory and a known victim; the engine preserves the existing plot attribution.
 
+The NPC wire decision separates physical `plan` steps from nullable `utterance`.
+`afterSteps` inserts the words after that many physical steps into the existing
+canonical plan; bounds and the combined six-step limit are validated. Speech is
+optional independently of action. No extra model call or dialogue rewrite is
+introduced, and saves retain their canonical intent representation.
+
+Observations separate `world` (perception and private experience) from
+`execution` (time rules, action catalogs, forecasts and private outcomes). New
+activity-start and execution-feedback records keep the private event envelope
+with typed details, without entering perceived memory or room chronology.
+Actual actions, heard speech and physical effects still supply evidence.
+
+There is no conversation owner or reserved addressee. Independent model calls
+can overlap; each sees facts available when its observation was built, or facts
+subsequently obtained through its own recall. Hearing does not oblige a reply.
+
+## Actions and items
+
+World/save format 5 reads formats 1–4 without inserting new authored objects.
+Transfer intents have an eight-bit quantity: 1–255 units, or zero for all.
+New player command defaults and examples select one unit; absent legacy fields
+retain all-stack behavior. Offers fix an amount without reserving stock.
+Partial transfers preserve the original remainder and its equipment, allocate
+one unequipped destination instance, and copy physical/text provenance.
+Complete transfers preserve the original ID. Split IDs never merge implicitly.
+
+Inside one active plan, itemId zero references the last successful take, steal
+or accepted offer. The engine stores the actual transferred ID, resolves it
+before each dependent step, and validates custody again. This reference survives
+an active-plan save and clears on cancellation, replacement or completion.
+
+Command completion presents verbs first, then contextual arguments and quantity.
+Selected entity IDs remain bound across view refreshes. Action descriptors
+contain blockers, durations and conditional forecasts. Forecasts share pure
+combat/consumption math and never advance RNG or inspect an opponent's chosen
+move or private abilities. Event text and private action outcomes report actual
+resolved deltas; accepted combat choices remain distinct from resolved attacks.
+Guard/disguise/cut-bonds are retired new intents in favor of wait/equip/release;
+saved historical forms remain readable.
+Legacy `Door.restricted` is readable but has no mechanical effect. A king or
+captain present in a destination room creates no invisible entry guard.
+Physical doors, locks and actual actions apply in both travel directions.
+
 The worker's private root contains only its runtime and isolated credentials.
 Host state, sockets, other minds and local integrations are outside it. Only the
 expected recall tool is accepted. Player speech interpreters receive a physical
 view with no NPC identity, journal, private memories or tools. GPT-6 Luna/high
 uses standard service tier; global Codex fast mode does not alter game calls.
-Failure remains visible to the manager without inventing an NPC decision.
+The manager retains the most recent failure with time and phase (inference,
+decision validation or plan execution), separately from the current status,
+including across a retry and successful correction. Diagnostics stay private.
 
 The worker discovers the real model metadata inside its isolated account,
 checks the CLI version and account identity, then writes a private sanitized
@@ -111,6 +163,14 @@ ticks do not. If completion makes a conversational answer stale, its unanswered
 conversation is rescheduled from current facts.
 
 ## Hearing
+
+Player input shouts when it contains at least two cased letters and all are
+uppercase, or ends with two or more exclamation marks. A single exclamation
+mark, numbers alone or a one-letter pronoun retain normal volume. Text is never
+recased or stripped of emphasis; NPCs still choose explicit volume. `/shout` is
+retired from player command discovery. The UI previews shouting and marks
+projected shout events with `»` (`>>` on ASCII terminals), including own speech.
+Commands remain in editor history, without raw command echoes in chat.
 
 Ordinary speech stays in a room. Shouts cross exactly one door to adjoining
 rooms, including closed doors with stronger attenuation. Each listener receives

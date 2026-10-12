@@ -166,6 +166,7 @@ impl Engine {
             Self::create_world(&content, language, seed, mode)?
         };
         Self::restore_portraits(&mut world);
+        Self::restore_item_origins(&mut world, &content);
         let locale = world.language.clone();
         if store.load()?.is_none() {
             store.new_world(&world, &memories)?;
@@ -237,6 +238,7 @@ impl Engine {
                     importance: 8,
                     source_id: Some(actor.id),
                     evidence_ids: vec![],
+                    perceived: None,
                 });
             }
             let equipment = source
@@ -288,6 +290,7 @@ impl Engine {
                 summary: "A new evening begins.".into(),
                 activity: None,
                 plan: vec![],
+                last_acquired_item_id: 0,
                 accepted_plots: vec![],
                 decision_version: 0,
                 unconscious_until: None,
@@ -304,7 +307,7 @@ impl Engine {
             actor.portrait_key = Some(key);
         }
         let world = WorldState {
-            format: 4,
+            format: 5,
             language: language.into(),
             scenario_id: content.id.clone(),
             mode: mode.into(),
@@ -333,6 +336,10 @@ impl Engine {
             items: source
                 .items
                 .into_iter()
+                .map(|mut item| {
+                    item.text_origin = Some(TextOrigin::Authored(item.id));
+                    item
+                })
                 .filter(|i| mode == "solo" || i.owner_id != Some(PLAYER))
                 .collect(),
             offers: vec![],
@@ -444,6 +451,9 @@ impl Engine {
                 .content
                 .actor_text(id, "name", &actor.name, &self.language);
         }
+        if let Some(item) = self.item(id) {
+            return self.item_text(item, "name");
+        }
         for (kind, value) in [
             (
                 "rooms",
@@ -454,7 +464,6 @@ impl Engine {
                     .map(|r| r.name.as_str()),
             ),
             ("doors", self.door(id).map(|d| d.name.as_str())),
-            ("items", self.item(id).map(|i| i.name.as_str())),
         ] {
             if let Some(name) = value {
                 return self
@@ -464,6 +473,74 @@ impl Engine {
             }
         }
         id.to_string()
+    }
+    fn item_text(&self, item: &Item, field: &str) -> String {
+        let source = if field == "name" {
+            &item.name
+        } else {
+            &item.description
+        };
+        match item.text_origin {
+            Some(TextOrigin::Authored(id)) => {
+                self.content
+                    .saved_entity_text("items", id, field, source, &self.language)
+            }
+            Some(TextOrigin::Recipe(recipe)) => {
+                let spec = recipe_spec(recipe);
+                let (en, pl) = if field == "name" {
+                    (spec.name, spec.polish_name)
+                } else {
+                    (spec.description, spec.polish_description)
+                };
+                if source == en || source == pl {
+                    self.text(en, pl)
+                } else {
+                    source.clone()
+                }
+            }
+            None => source.clone(),
+        }
+    }
+    fn restore_item_origins(world: &mut WorldState, content: &WorldContent) {
+        for item in &mut world.items {
+            if item.text_origin.is_some() {
+                continue;
+            }
+            let mut candidates = Vec::new();
+            for authored in content.scenario["items"].as_array().into_iter().flatten() {
+                let Some(id) = authored["id"]
+                    .as_u64()
+                    .and_then(|id| u16::try_from(id).ok())
+                else {
+                    continue;
+                };
+                // These templates did not exist in formats 1–4. An old instance
+                // with their ID must never acquire their identity merely by ID.
+                if (900..=905).contains(&id) {
+                    continue;
+                }
+                if serde_json::to_value(item.kind).ok().as_ref() == Some(&authored["kind"])
+                    && (content.item_field_is_authored(id, "name", &item.name)
+                        || content.item_field_is_authored(id, "description", &item.description))
+                {
+                    candidates.push(TextOrigin::Authored(id));
+                }
+            }
+            for recipe in [Recipe::Meal, Recipe::Lockpick, Recipe::Medicine] {
+                let spec = recipe_spec(recipe);
+                if item.kind == spec.kind
+                    && (item.name == spec.name
+                        || item.name == spec.polish_name
+                        || item.description == spec.description
+                        || item.description == spec.polish_description)
+                {
+                    candidates.push(TextOrigin::Recipe(recipe));
+                }
+            }
+            if candidates.len() == 1 {
+                item.text_origin = candidates.pop();
+            }
+        }
     }
     pub fn role(&self, actor: &Actor) -> String {
         self.content
@@ -684,7 +761,7 @@ impl Engine {
         value
     }
     fn visible_item(&self, item: &Item) -> Value {
-        json!({"id":item.id,"name":self.name(item.id),"kind":item.kind,"quantity":item.quantity,"ownerId":item.owner_id,"description":self.authored(&item.description)})
+        json!({"id":item.id,"name":self.name(item.id),"kind":item.kind,"quantity":item.quantity,"ownerId":item.owner_id,"description":self.item_text(item, "description")})
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -698,7 +775,23 @@ impl Engine {
         causes: Vec<u64>,
         sound: Option<&str>,
     ) -> Result<WorldEvent> {
-        self.record_with_perceptions(kind, source, room, text, audience, causes, sound, vec![])
+        self.record_with_perceptions(
+            kind,
+            source,
+            room,
+            text,
+            audience,
+            causes,
+            sound,
+            vec![],
+            match kind {
+                "injury" => Some(EventDetails::Injury),
+                "death" => Some(EventDetails::Death),
+                "activity" => Some(EventDetails::ActivityStarted),
+                "feedback" => Some(EventDetails::ExecutionFeedback),
+                _ => None,
+            },
+        )
     }
     #[allow(clippy::too_many_arguments)]
     fn record_with_perceptions(
@@ -711,6 +804,7 @@ impl Engine {
         causes: Vec<u64>,
         sound: Option<&str>,
         perceptions: Vec<Perception>,
+        details: Option<EventDetails>,
     ) -> Result<WorldEvent> {
         let mut heard =
             audience.unwrap_or_else(|| room.map_or_else(Vec::new, |id| self.witnesses(id)));
@@ -724,7 +818,12 @@ impl Engine {
         let event = self.store.event(WorldEvent {
             id: 0,
             time: self.world.time,
-            kind: kind.into(),
+            kind: if matches!(kind, "activity" | "feedback") {
+                "private"
+            } else {
+                kind
+            }
+            .into(),
             actor_id: source,
             room_id: room,
             text,
@@ -732,8 +831,14 @@ impl Engine {
             causes,
             sound: cue.map(str::to_owned),
             perceptions,
+            details,
         })?;
-        for observer in &event.audience {
+        for observer in event.audience.iter().filter(|_| {
+            !matches!(
+                event.details,
+                Some(EventDetails::ActivityStarted | EventDetails::ExecutionFeedback)
+            )
+        }) {
             let projected = event
                 .projected(*observer)
                 .context("Missing event perception.")?;
@@ -759,6 +864,10 @@ impl Engine {
                     4
                 },
                 evidence_ids: vec![],
+                perceived: projected
+                    .room_id
+                    .zip(projected.details)
+                    .map(|(room_id, details)| PerceivedEvent { room_id, details }),
             })?;
         }
         self.deferred_events.push(event.clone());
@@ -828,7 +937,7 @@ impl Engine {
             actor.invalidate_decision()?;
             if priority == WakePriority::Danger {
                 actor.activity = None;
-                actor.plan.clear();
+                actor.clear_plan();
             }
         }
         let version = actor.decision_version;
@@ -935,10 +1044,12 @@ impl Engine {
             let id=s.allocate_id()?;
             let knowledge=template.knowledge.clone();
             let used:Vec<_>=s.world.actors.iter().filter_map(|a|a.portrait_key.clone()).collect();
-            let actor=Actor{id,name:name.clone(),role:"Prisoner".into(),biography:String::new(),personality:template.personality,portrait_key:Some(crate::portraits::portrait_key(id,&used)),room_id:DUNGEON,health:100.0,hunger:template.hunger,thirst:template.thirst,fatigue:template.fatigue,flags:0,coins:template.coins,equipment:vec![],skills:template.skills,known_rooms:template.known_rooms,known_actors:template.known_actors.into_iter().filter(|id|s.world.actors.iter().any(|a|a.id==*id)).collect(),goals:vec![s.content.objective(&s.language)],relationships:BTreeMap::new(),summary:"A prisoner arrives.".into(),activity:None,plan:vec![],accepted_plots:vec![],decision_version:0,unconscious_until:None,entered_event_id:0,last_action_outcome:None,last_plan_failure:None,correction_used:false};
+            let actor=Actor{id,name:name.clone(),role:"Prisoner".into(),biography:String::new(),personality:template.personality,portrait_key:Some(crate::portraits::portrait_key(id,&used)),room_id:DUNGEON,health:100.0,hunger:template.hunger,thirst:template.thirst,fatigue:template.fatigue,flags:0,coins:template.coins,equipment:vec![],skills:template.skills,known_rooms:template.known_rooms,known_actors:template.known_actors.into_iter().filter(|id|s.world.actors.iter().any(|a|a.id==*id)).collect(),goals:vec![s.content.objective(&s.language)],relationships:BTreeMap::new(),summary:"A prisoner arrives.".into(),activity:None,plan:vec![],last_acquired_item_id:0,accepted_plots:vec![],decision_version:0,unconscious_until:None,entered_event_id:0,last_action_outcome:None,last_plan_failure:None,correction_used:false};
             s.world.actors.push(actor);s.world.players.push(HumanPlayer{identity:identity.into(),actor_id:id,listener:false});
             for mut item in source.items.into_iter().filter(|item|item.owner_id==Some(PLAYER)){item.id=s.allocate_id()?;item.owner_id=Some(id);item.poisoned_by=None;item.causes.clear();if item.equipped{s.actor_mut(id)?.equipment.push(item.id);}s.world.items.push(item);}
-            for text in knowledge{s.store.remember(Memory{id:0,actor_id:id,time:s.world.time,event_id:None,kind:"background".into(),text:s.authored(&text),importance:8,source_id:Some(id),evidence_ids:vec![]})?;}
+            for text in knowledge{s.store.remember(Memory{id:0,actor_id:id,time:s.world.time,event_id:None,kind:"background".into(),text:s.authored(&text),importance:8,source_id:Some(id),evidence_ids:vec![],
+                perceived: None,
+            })?;}
             let event=s.record("action",Some(id),Some(DUNGEON),s.text(&format!("{name} is brought into the dungeon."),&format!("{name} trafia do lochu.")),None,vec![],Some("step"))?;
             s.actor_mut(id)?.entered_event_id=event.id;
             let witnesses:Vec<_>=s.nearby(id)?.iter().filter(|a|a.id!=id).map(|a|a.id).collect();
@@ -966,10 +1077,15 @@ impl Engine {
                 "To działanie ma nieprawidłową formę."
             ))
         })?;
+        check_new_plan(std::slice::from_ref(&intent))?;
         self.validate_intent(id, &intent)?;
         Ok(intent)
     }
     fn validate_intent(&self, id: u16, intent: &Intent) -> Result<()> {
+        ensure!(
+            intent.item_id() != Some(0),
+            "An acquired-item reference is only available inside an active plan."
+        );
         let actor = self.actor(id)?;
         ensure!(
             actor.awake(),
@@ -1036,6 +1152,14 @@ impl Engine {
                     "Ten przedmiot jest niewidoczny lub poza zasięgiem."
                 )
             );
+        }
+        if let Some(quantity) = intent.quantity() {
+            let item = intent.item_id().context("Missing item ID")?;
+            if matches!(intent, Intent::Offer { .. }) {
+                self.quantity_count(item, quantity)?;
+            } else {
+                self.transfer_count(item, quantity)?;
+            }
         }
         let error = match intent {
             Intent::Move { .. } | Intent::Flee { .. }
@@ -1134,16 +1258,11 @@ impl Engine {
                 "Świat osiągnął limit ofert.",
             )),
             Intent::Equip { .. }
-                if item.is_none_or(|i| {
-                    !matches!(
-                        i.kind,
-                        ItemKind::Weapon | ItemKind::Clothes | ItemKind::Key | ItemKind::Document
-                    )
-                }) =>
+                if item.is_none_or(|i| !matches!(i.kind, ItemKind::Weapon | ItemKind::Clothes)) =>
             {
                 Some((
-                    "You cannot equip that item.",
-                    "Nie możesz wyposażyć tego przedmiotu.",
+                    "Only weapons and clothes can be equipped.",
+                    "Możesz wyposażyć tylko broń lub ubranie.",
                 ))
             }
             Intent::Eat { .. } if item.is_none_or(|i| i.kind != ItemKind::Food) => {
@@ -1250,6 +1369,8 @@ impl Engine {
                         && self
                             .item(o.item_id)
                             .is_some_and(|i| i.owner_id == Some(o.from))
+                        && (!matches!(intent, Intent::AcceptOffer { .. })
+                            || self.transfer_count(o.item_id, o.quantity).is_ok())
                 }) =>
             {
                 Some((
@@ -1432,8 +1553,13 @@ impl Engine {
         if let Err(error) = self.check_busy(id, &intent) {
             return Ok(ActionResult::fail(error.to_string()).value());
         }
-        self.mutate(|s| s.begin(id, intent, causes))
-            .map(ActionResult::value)
+        self.mutate(|s| {
+            if !matches!(intent, Intent::Speak { .. }) {
+                s.actor_mut(id)?.last_acquired_item_id = 0;
+            }
+            s.begin(id, intent, causes)
+        })
+        .map(ActionResult::value)
     }
     fn has_key(&self, id: u16, door: &Door) -> bool {
         door.lock.is_some()
@@ -1464,14 +1590,9 @@ impl Engine {
         );
         Ok(())
     }
-    fn begin(&mut self, id: u16, intent: Intent, causes: Vec<u64>) -> Result<ActionResult> {
+    fn action_duration(&self, intent: &Intent) -> (f64, f64) {
         if matches!(intent, Intent::Speak { .. } | Intent::Inspect { .. }) {
-            return self.execute(id, intent, causes);
-        }
-        if matches!(intent, Intent::Attack { .. })
-            || self.encounter(id).is_some() && intent.combat_move()
-        {
-            return self.choose_combat(id, intent, causes);
+            return (0.0, 0.0);
         }
         let real = if intent.travel() {
             self.tuning.travel_seconds
@@ -1485,15 +1606,40 @@ impl Engine {
             }
         ) {
             self.tuning.lockpick_seconds
+        } else if intent.combat_move() {
+            self.tuning.combat_round_seconds
         } else {
             self.tuning.action_seconds
         };
-        let game_duration = intent.seconds().map_or(real * CLOCK_RATE, f64::from);
+        intent
+            .seconds()
+            .map_or((real * CLOCK_RATE, real), |seconds| {
+                (f64::from(seconds), f64::from(seconds) / CLOCK_RATE)
+            })
+    }
+    fn begin(&mut self, id: u16, intent: Intent, causes: Vec<u64>) -> Result<ActionResult> {
+        if matches!(intent, Intent::Speak { .. } | Intent::Inspect { .. }) {
+            return self.execute(id, intent, causes);
+        }
+        self.interrupt_activity(id)?;
+        if matches!(intent, Intent::Attack { .. })
+            || self.encounter(id).is_some() && intent.combat_move()
+        {
+            return self.choose_combat(id, intent, causes);
+        }
+        let (game_duration, real) = self.action_duration(&intent);
+        let body = self.actor(id)?;
         let activity = Activity {
             intent: intent.clone(),
             started: self.world.time,
             ends: self.world.time + game_duration,
             causes: causes.clone(),
+            started_vitals: intent.long().then_some([
+                body.health,
+                body.hunger,
+                body.thirst,
+                body.fatigue,
+            ]),
             interaction_ends: if intent.long() {
                 None
             } else {
@@ -1513,7 +1659,7 @@ impl Engine {
             let target = self.actor_mut(target_id)?;
             target.invalidate_decision()?;
             target.activity = None;
-            target.plan.clear();
+            target.clear_plan();
             let destination = self.destination(self.door(door_id).context("Missing door.")?, room);
             let mut audience = self.witnesses(room);
             audience.push(target_id);
@@ -1587,7 +1733,7 @@ impl Engine {
             }
         }
         self.record(
-            "private",
+            "activity",
             Some(id),
             Some(room),
             self.text(
@@ -1713,7 +1859,7 @@ impl Engine {
                 });
             let actor = self.actor_mut(member)?;
             actor.activity = None;
-            actor.plan.clear();
+            actor.clear_plan();
             actor.invalidate_decision()?;
             self.request_decision(
                 member,
@@ -1773,7 +1919,7 @@ impl Engine {
         }
         let actor = self.actor_mut(id)?;
         actor.activity = None;
-        actor.plan.clear();
+        actor.clear_plan();
         self.wakes.remove(&id);
         let participant = self
             .world
@@ -1786,7 +1932,7 @@ impl Engine {
         participant.causes = causes.clone();
         if !matches!(choice, Intent::Attack { .. }) {
             self.record(
-                "private",
+                "feedback",
                 Some(id),
                 Some(room),
                 if let Intent::Flee { door_id } = choice {
@@ -1811,11 +1957,13 @@ impl Engine {
                 None,
             )?;
         }
-        self.maybe_resolve_combat(&encounter_id)?;
-        Ok(ActionResult::ok(self.text(
+        let result = ActionResult::ok(self.text(
             "Your combat choice is submitted.",
             "Twój ruch w walce został przyjęty.",
-        )))
+        ));
+        self.remember_outcome(id, choice, &result, false)?;
+        self.maybe_resolve_combat(&encounter_id)?;
+        Ok(result)
     }
     fn maybe_resolve_combat(&mut self, id: &str) -> Result<()> {
         if self.resolving_combat {
@@ -1913,19 +2061,14 @@ impl Engine {
                 .filter(|i| i.kind == ItemKind::Weapon && i.equipped)
                 .map(|i| i.power)
                 .fold(0.0, f64::max);
-            let base = (8.0
-                + actor.skills.combat * 0.24
-                + weapon
-                + if actor.flags & HIDDEN != 0 { 18.0 } else { 0.0 }
-                - actor.fatigue * 0.06
-                - target.skills.combat * 0.1)
-                .round()
-                .max(4.0);
-            let damage = if target.awake() && matches!(target_choice, Intent::Defend { .. }) {
-                base / 2.0
-            } else {
-                base
-            };
+            let damage = attack_damage(
+                actor.skills.combat,
+                weapon,
+                actor.flags & HIDDEN != 0,
+                actor.fatigue,
+                target.skills.combat,
+                target.awake() && matches!(target_choice, Intent::Defend { .. }),
+            );
             let mut all_causes = causes.clone();
             all_causes.extend(self.plot_causes(*source, *target_id));
             strikes.push((*source, *target_id, damage, *style, all_causes));
@@ -1949,14 +2092,17 @@ impl Engine {
                 if !self.actor(target_id)?.alive() {
                     continue;
                 }
+                let health_before = self.actor(target_id)?.health;
                 if style == AttackStyle::Subdue && self.actor(target_id)?.health - damage <= 20.0 {
                     let deadline = self.world.interaction_time + self.tuning.recovery_seconds;
                     let target = self.actor_mut(target_id)?;
-                    target.health = (target.health - damage).max(10.0);
+                    let before = target.health;
+                    target.health = subdued_health(before, damage);
+                    let dealt = before - target.health;
                     target.flags |= UNCONSCIOUS;
                     target.unconscious_until = Some(deadline);
                     target.activity = None;
-                    target.plan.clear();
+                    target.clear_plan();
                     target.invalidate_decision()?;
                     let mut audience = self.witnesses(encounter.room_id);
                     audience.push(target_id);
@@ -1965,11 +2111,17 @@ impl Engine {
                         Some(source),
                         Some(encounter.room_id),
                         self.text(
-                            &format!("{} subdues {}.", self.name(source), self.name(target_id)),
                             &format!(
-                                "{} obezwładnia osobę {}.",
+                                "{} subdues {}: −{} HP; unconscious.",
                                 self.name(source),
-                                self.name(target_id)
+                                self.name(target_id),
+                                number_text(dealt)
+                            ),
+                            &format!(
+                                "{} obezwładnia osobę {}: −{} HP; nieprzytomność.",
+                                self.name(source),
+                                self.name(target_id),
+                                number_text(dealt)
                             ),
                         ),
                         Some(audience),
@@ -1989,6 +2141,42 @@ impl Engine {
                         ),
                     )?;
                 }
+                let dealt = health_before - self.actor(target_id)?.health;
+                let result = ActionResult::ok(self.text(
+                    &format!(
+                        "{} → {}: −{} HP{}.",
+                        self.name(source),
+                        self.name(target_id),
+                        number_text(dealt),
+                        if self.actor(target_id)?.flags & UNCONSCIOUS != 0 {
+                            "; unconscious"
+                        } else {
+                            ""
+                        }
+                    ),
+                    &format!(
+                        "{} → {}: −{} HP{}.",
+                        self.name(source),
+                        self.name(target_id),
+                        number_text(dealt),
+                        if self.actor(target_id)?.flags & UNCONSCIOUS != 0 {
+                            "; nieprzytomność"
+                        } else {
+                            ""
+                        }
+                    ),
+                ));
+                self.remember_outcome(source, Intent::Attack { target_id, style }, &result, true)?;
+            }
+            for (actor_id, (before, choice, _)) in &snapshot {
+                if matches!(choice, Intent::Defend { .. }) {
+                    let loss = before.health - self.actor(*actor_id)?.health;
+                    let result = ActionResult::ok(self.text(
+                        &format!("Defended this round: −{} HP received.", number_text(loss)),
+                        &format!("Obrona w tej rundzie: otrzymano −{} HP.", number_text(loss)),
+                    ));
+                    self.remember_outcome(*actor_id, choice.clone(), &result, true)?;
+                }
             }
             for (actor_id, (_, choice, causes)) in &snapshot {
                 let Intent::Flee { door_id } = choice else {
@@ -2004,10 +2192,11 @@ impl Engine {
                             self.world.interaction_time + self.tuning.travel_seconds,
                         ),
                         causes: causes.clone(),
+                        started_vitals: None,
                     };
                     let actor = self.actor_mut(*actor_id)?;
                     actor.activity = Some(activity);
-                    actor.plan.clear();
+                    actor.clear_plan();
                     actor.invalidate_decision()?;
                     let destination = self.destination(
                         self.door(*door_id).context("Missing door.")?,
@@ -2138,6 +2327,64 @@ impl Engine {
         item.equipped = false;
         Ok(())
     }
+    fn transfer_count(&self, item_id: u16, quantity: u8) -> Result<u8> {
+        let count = self.quantity_count(item_id, quantity)?;
+        let item = self.item(item_id).context("Missing item.")?;
+        ensure!(
+            count == item.quantity || self.world.next_item_id <= u32::from(u16::MAX),
+            "{}",
+            self.text(
+                "The world has reached its item limit.",
+                "Świat osiągnął limit przedmiotów."
+            )
+        );
+        Ok(count)
+    }
+    fn quantity_count(&self, item_id: u16, quantity: u8) -> Result<u8> {
+        let item = self.item(item_id).context("Missing item.")?;
+        let count = if quantity == 0 {
+            item.quantity
+        } else {
+            quantity
+        };
+        ensure!(
+            count > 0 && count <= item.quantity,
+            "{}",
+            self.text(
+                "Not enough units in this stack.",
+                "W stosie nie ma tylu sztuk."
+            )
+        );
+        Ok(count)
+    }
+    fn transfer_quantity(
+        &mut self,
+        item_id: u16,
+        quantity: u8,
+        owner: Option<u16>,
+        room: Option<u16>,
+    ) -> Result<(u16, u8)> {
+        let count = self.transfer_count(item_id, quantity)?;
+        let mut part = self.item(item_id).context("Missing item.")?.clone();
+        if count == part.quantity {
+            self.transfer(item_id, owner, room)?;
+            return Ok((item_id, count));
+        }
+        part.id = self.allocate_id()?;
+        self.world
+            .items
+            .iter_mut()
+            .find(|i| i.id == item_id)
+            .context("Missing item.")?
+            .quantity -= count;
+        part.quantity = count;
+        part.owner_id = owner;
+        part.room_id = room;
+        part.equipped = false;
+        let moved = part.id;
+        self.world.items.push(part);
+        Ok((moved, count))
+    }
     fn consume(&mut self, id: u16) -> Result<()> {
         let item = self
             .world
@@ -2194,14 +2441,26 @@ impl Engine {
             return Ok(());
         }
         let target = self.actor_mut(target_id)?;
+        let before = target.health;
         target.health = clamp(target.health - amount);
+        let dealt = before - target.health;
         target.flags &= !HIDDEN;
         let room = target.room_id;
         let mut audience = self.witnesses(room);
         audience.push(target_id);
         let injury_text = self.text(
-            &format!("{} is hurt by {description}.", self.name(target_id)),
-            &format!("{} odnosi obrażenia: {description}.", self.name(target_id)),
+            &format!(
+                "{} is hurt by {description}: −{} HP ({} HP left).",
+                self.name(target_id),
+                number_text(dealt),
+                number_text(self.actor(target_id)?.health)
+            ),
+            &format!(
+                "{} odnosi obrażenia: {description}: −{} HP (pozostało {} HP).",
+                self.name(target_id),
+                number_text(dealt),
+                number_text(self.actor(target_id)?.health)
+            ),
         );
         let perceptions = if visible_source {
             vec![]
@@ -2213,6 +2472,7 @@ impl Engine {
                     room_id: room,
                     source_id: None,
                     text: injury_text.clone(),
+                    details: Some(EventDetails::Injury),
                 })
                 .collect()
         };
@@ -2225,11 +2485,12 @@ impl Engine {
             causes.clone(),
             None,
             perceptions,
+            Some(EventDetails::Injury),
         )?;
         if !self.actor(target_id)?.alive() {
             let target = self.actor_mut(target_id)?;
             target.activity = None;
-            target.plan.clear();
+            target.clear_plan();
             target.invalidate_decision()?;
             target.unconscious_until = None;
             target.flags &= !UNCONSCIOUS;
@@ -2263,6 +2524,7 @@ impl Engine {
                         room_id: room,
                         source_id: None,
                         text: death_text.clone(),
+                        details: Some(EventDetails::Death),
                     })
                     .collect()
             };
@@ -2275,6 +2537,7 @@ impl Engine {
                 causal,
                 None,
                 perceptions,
+                Some(EventDetails::Death),
             )?;
             if target_id == KING {
                 self.world.winner_id = self.credited_player(source, target_id);
@@ -2332,7 +2595,22 @@ impl Engine {
 
     fn execute(&mut self, id: u16, intent: Intent, causes: Vec<u64>) -> Result<ActionResult> {
         let start = self.deferred_events.len();
-        let result = self.execute_action(id, &intent, causes)?;
+        let mut result = self.execute_action(id, &intent, causes)?;
+        if result.ok
+            && !matches!(intent, Intent::Speak { .. } | Intent::Inspect { .. })
+            && let Some(event) = self
+                .deferred_events
+                .iter()
+                .skip(start)
+                .rev()
+                .find(|event| event.actor_id == Some(id) && event.audience.contains(&id))
+        {
+            result.message = event
+                .projected(id)
+                .context("Missing result perception")?
+                .text;
+            result.event_id = Some(event.id);
+        }
         if result.ok && !matches!(intent, Intent::Inspect { .. }) {
             let sound = match &intent {
                 Intent::Move { .. } | Intent::Flee { .. } | Intent::Escort { .. } => Some("step"),
@@ -2390,9 +2668,9 @@ impl Engine {
     ) -> Result<ActionResult> {
         if let Err(error) = self.validate_intent(id, intent) {
             let room = self.actor(id)?.room_id;
-            self.actor_mut(id)?.plan.clear();
+            self.actor_mut(id)?.clear_plan();
             self.record(
-                "private",
+                "feedback",
                 Some(id),
                 Some(room),
                 self.text(
@@ -2414,33 +2692,8 @@ impl Engine {
             Intent::Move { .. } | Intent::Flee { .. } | Intent::Escort { .. } => {
                 let door = door.context("Missing door.")?;
                 let destination = self.destination(&door, room);
-                let guarded = self.world.actors.iter().any(|a| {
-                    a.id != id
-                        && a.room_id == destination
-                        && a.awake()
-                        && matches!(a.role.as_str(), "King" | "Guard captain" | "Dungeon guard")
-                });
-                if self.is_player(id)
-                    && door.restricted
-                    && guarded
-                    && actor.flags & (DISGUISED | HIDDEN) == 0
-                {
-                    let escort = self.world.actors.iter().any(|a| {
-                        a.room_id == room
-                            && matches!(a.role.as_str(), "Steward" | "Guard captain")
-                            && a.relationships.get(&id).is_some_and(|r| r.trust >= 20.0)
-                    });
-                    if !escort {
-                        self.record("action",Some(id),Some(room),self.text("You are challenged at the royal approach. A disguise or a trusted escort could help.","Zatrzymują cię przy wejściu do króla. Pomóc może przebranie lub zaufana eskorta."),None,causes,None)?;
-                        self.actor_mut(id)?.plan.clear();
-                        return Ok(ActionResult::fail(self.text(
-                            "Royal access is being watched.",
-                            "Wejście do króla jest strzeżone.",
-                        )));
-                    }
-                }
                 let hidden = actor.flags & HIDDEN != 0;
-                self.record(
+                self.record_with_perceptions(
                     "action",
                     Some(id),
                     Some(room),
@@ -2451,6 +2704,8 @@ impl Engine {
                     if hidden { Some(vec![id]) } else { None },
                     causes.clone(),
                     None,
+                    vec![],
+                    Some(EventDetails::Left),
                 )?;
                 {
                     let actor = self.actor_mut(id)?;
@@ -2463,14 +2718,14 @@ impl Engine {
                     let target = self.actor_mut(*target_id)?;
                     target.room_id = destination;
                     target.activity = None;
-                    target.plan.clear();
+                    target.clear_plan();
                     target.invalidate_decision()?;
                     if !target.known_rooms.contains(&destination) {
                         target.known_rooms.push(destination);
                     }
                     let mut audience = self.witnesses(destination);
                     audience.push(*target_id);
-                    let event = self.record(
+                    let event = self.record_with_perceptions(
                         "action",
                         Some(id),
                         Some(destination),
@@ -2489,6 +2744,8 @@ impl Engine {
                         Some(audience),
                         causes.clone(),
                         None,
+                        vec![],
+                        Some(EventDetails::Entered),
                     )?;
                     self.actor_mut(*target_id)?.entered_event_id = event.id;
                 }
@@ -2509,7 +2766,7 @@ impl Engine {
                 if noticed {
                     self.actor_mut(id)?.flags &= !HIDDEN;
                 }
-                let event = self.record(
+                let event = self.record_with_perceptions(
                     "action",
                     Some(id),
                     Some(destination),
@@ -2520,6 +2777,8 @@ impl Engine {
                     if noticed { None } else { Some(vec![id]) },
                     causes.clone(),
                     None,
+                    vec![],
+                    Some(EventDetails::Entered),
                 )?;
                 {
                     let actor = self.actor_mut(id)?;
@@ -2593,13 +2852,13 @@ impl Engine {
                         &format!(
                             "{}: {} ({} remaining).",
                             self.name(item.id),
-                            self.authored(&item.description),
+                            self.item_text(item, "description"),
                             item.quantity
                         ),
                         &format!(
                             "{}: {} (pozostało: {}).",
                             self.name(item.id),
-                            self.authored(&item.description),
+                            self.item_text(item, "description"),
                             item.quantity
                         ),
                     );
@@ -2695,41 +2954,52 @@ impl Engine {
                 )?;
                 return Ok(ActionResult::ok(text));
             }
-            Intent::Take { item_id } => {
-                self.transfer(*item_id, Some(id), None)?;
+            Intent::Take {
+                item_id, quantity, ..
+            } => {
+                let (moved, count) = self.transfer_quantity(*item_id, *quantity, Some(id), None)?;
+                self.actor_mut(id)?.last_acquired_item_id = moved;
                 self.record(
                     "action",
                     Some(id),
                     Some(room),
                     self.text(
-                        &format!("{name} takes {}.", self.name(*item_id)),
-                        &format!("{name} zabiera {}.", self.name(*item_id)),
+                        &format!("{name} takes {} ×{count}.", self.name(moved)),
+                        &format!("{name} zabiera {} ×{count}.", self.name(moved)),
                     ),
                     None,
                     causes,
                     None,
                 )?;
             }
-            Intent::Steal { item_id } => {
+            Intent::Steal {
+                item_id, quantity, ..
+            } => {
                 let item = item.context("Missing item.")?;
                 let owner = self
                     .actor(item.owner_id.context("Missing owner.")?)?
                     .clone();
-                let chance = (0.45
-                    + (actor.skills.stealth - owner.skills.stealth - owner.skills.combat / 3.0
-                        + owner.fatigue / 2.0)
-                        / 120.0
-                    + if actor.flags & HIDDEN != 0 { 0.25 } else { 0.0 })
-                .clamp(0.08, 0.9);
+                let chance = theft_chance(
+                    actor.skills.stealth,
+                    actor.flags & HIDDEN != 0,
+                    owner.skills.stealth,
+                    owner.skills.combat,
+                    owner.fatigue,
+                );
                 if self.random() < chance {
-                    self.transfer(*item_id, Some(id), None)?;
+                    let (moved, count) =
+                        self.transfer_quantity(*item_id, *quantity, Some(id), None)?;
+                    self.actor_mut(id)?.last_acquired_item_id = moved;
                     self.record(
                         "private",
                         Some(id),
                         Some(room),
                         self.text(
-                            &format!("You steal {} without being noticed.", self.name(*item_id)),
-                            &format!("Kradniesz {} niezauważenie.", self.name(*item_id)),
+                            &format!(
+                                "You steal {} ×{count} without being noticed.",
+                                self.name(moved)
+                            ),
+                            &format!("Kradniesz {} ×{count} niezauważenie.", self.name(moved)),
                         ),
                         Some(vec![id]),
                         causes,
@@ -2766,18 +3036,21 @@ impl Engine {
                         true,
                         true,
                     )?;
-                    self.actor_mut(id)?.plan.clear();
+                    self.actor_mut(id)?.clear_plan();
                     return Ok(ActionResult::fail(
                         self.text("Your theft is noticed.", "Kradzież zostaje zauważona."),
                     ));
                 }
             }
-            Intent::Drop { item_id } => {
-                self.transfer(*item_id, None, Some(room))?;
+            Intent::Drop {
+                item_id, quantity, ..
+            } => {
+                let (moved, count) =
+                    self.transfer_quantity(*item_id, *quantity, None, Some(room))?;
                 self.world
                     .items
                     .iter_mut()
-                    .find(|i| i.id == *item_id)
+                    .find(|i| i.id == moved)
                     .context("Missing item.")?
                     .visible = true;
                 self.record(
@@ -2785,8 +3058,8 @@ impl Engine {
                     Some(id),
                     Some(room),
                     self.text(
-                        &format!("{name} puts down {}.", self.name(*item_id)),
-                        &format!("{name} odkłada {}.", self.name(*item_id)),
+                        &format!("{name} puts down {} ×{count}.", self.name(moved)),
+                        &format!("{name} odkłada {} ×{count}.", self.name(moved)),
                     ),
                     None,
                     causes,
@@ -2842,20 +3115,26 @@ impl Engine {
                     None,
                 )?;
             }
-            Intent::Give { item_id, target_id } => {
-                self.transfer(*item_id, Some(*target_id), None)?;
+            Intent::Give {
+                item_id,
+                target_id,
+                quantity,
+                ..
+            } => {
+                let (_, count) =
+                    self.transfer_quantity(*item_id, *quantity, Some(*target_id), None)?;
                 self.record(
                     "action",
                     Some(id),
                     Some(room),
                     self.text(
                         &format!(
-                            "{name} gives {} to {}.",
+                            "{name} gives {} ×{count} to {}.",
                             self.name(*item_id),
                             self.name(*target_id)
                         ),
                         &format!(
-                            "{name} przekazuje {} osobie {}.",
+                            "{name} przekazuje {} ×{count} osobie {}.",
                             self.name(*item_id),
                             self.name(*target_id)
                         ),
@@ -2874,19 +3153,25 @@ impl Engine {
                     true,
                 )?;
             }
-            Intent::Offer { item_id, target_id } => {
+            Intent::Offer {
+                item_id,
+                target_id,
+                quantity,
+                ..
+            } => {
+                let count = self.quantity_count(*item_id, *quantity)?;
                 let event = self.record(
                     "action",
                     Some(id),
                     Some(room),
                     self.text(
                         &format!(
-                            "{name} offers {} to {}.",
+                            "{name} offers {} ×{count} to {}.",
                             self.name(*item_id),
                             self.name(*target_id)
                         ),
                         &format!(
-                            "{name} oferuje {} osobie {}.",
+                            "{name} oferuje {} ×{count} osobie {}.",
                             self.name(*item_id),
                             self.name(*target_id)
                         ),
@@ -2900,6 +3185,7 @@ impl Engine {
                     from: id,
                     to: *target_id,
                     item_id: *item_id,
+                    quantity: count,
                     expires: self.world.time + self.tuning.offer_seconds * CLOCK_RATE,
                     interaction_expires: Some(
                         self.world.interaction_time + self.tuning.offer_seconds,
@@ -2962,7 +3248,9 @@ impl Engine {
                     .context("Missing offer.")?
                     .clone();
                 let status = if matches!(intent, Intent::AcceptOffer { .. }) {
-                    self.transfer(offer.item_id, Some(id), None)?;
+                    let (moved, _) =
+                        self.transfer_quantity(offer.item_id, offer.quantity, Some(id), None)?;
+                    self.actor_mut(id)?.last_acquired_item_id = moved;
                     "accepted"
                 } else {
                     "declined"
@@ -2981,19 +3269,29 @@ impl Engine {
                     Some(room),
                     self.text(
                         &format!(
-                            "{name} {status} {}’s offer of {}.",
+                            "{name} {status} {}’s offer of {} ×{}.",
                             self.name(offer.from),
-                            self.name(offer.item_id)
+                            self.name(offer.item_id),
+                            if offer.quantity == 0 {
+                                self.item(offer.item_id).map_or(0, |i| i.quantity)
+                            } else {
+                                offer.quantity
+                            }
                         ),
                         &format!(
-                            "{name} {} ofertę osoby {}: {}.",
+                            "{name} {} ofertę osoby {}: {} ×{}.",
                             if status == "accepted" {
                                 "przyjmuje"
                             } else {
                                 "odrzuca"
                             },
                             self.name(offer.from),
-                            self.name(offer.item_id)
+                            self.name(offer.item_id),
+                            if offer.quantity == 0 {
+                                self.item(offer.item_id).map_or(0, |i| i.quantity)
+                            } else {
+                                offer.quantity
+                            }
                         ),
                     ),
                     None,
@@ -3072,6 +3370,8 @@ impl Engine {
             Intent::Eat { item_id } | Intent::Drink { item_id } => {
                 let item = item.context("Missing item.")?;
                 let item_name = self.name(*item_id);
+                let eating = matches!(intent, Intent::Eat { .. });
+                let before_need = if eating { actor.hunger } else { actor.thirst };
                 self.consume(*item_id)?;
                 let actor = self.actor_mut(id)?;
                 if matches!(intent, Intent::Eat { .. }) {
@@ -3079,13 +3379,14 @@ impl Engine {
                 } else {
                     actor.thirst = clamp(actor.thirst - item.power);
                 }
+                let delta = before_need - if eating { actor.hunger } else { actor.thirst };
                 let event = self.record(
                     "action",
                     Some(id),
                     Some(room),
                     self.text(
                         &format!(
-                            "{name} {} {item_name}.",
+                            "{name} {} {item_name} ×1.",
                             if matches!(intent, Intent::Eat { .. }) {
                                 "eats"
                             } else {
@@ -3093,7 +3394,7 @@ impl Engine {
                             }
                         ),
                         &format!(
-                            "{name} {} {item_name}.",
+                            "{name} {} {item_name} ×1.",
                             if matches!(intent, Intent::Eat { .. }) {
                                 "je"
                             } else {
@@ -3103,6 +3404,26 @@ impl Engine {
                     ),
                     None,
                     causes,
+                    None,
+                )?;
+                self.record(
+                    "feedback",
+                    Some(id),
+                    Some(room),
+                    self.text(
+                        &format!(
+                            "{}: −{}; consumed 1 unit.",
+                            if eating { "Hunger" } else { "Thirst" },
+                            number_text(delta)
+                        ),
+                        &format!(
+                            "{}: −{}; zużyto 1 sztukę.",
+                            if eating { "Głód" } else { "Pragnienie" },
+                            number_text(delta)
+                        ),
+                    ),
+                    Some(vec![id]),
+                    vec![event.id],
                     None,
                 )?;
                 if let Some(source) = item.poisoned_by {
@@ -3128,7 +3449,7 @@ impl Engine {
             | Intent::Defend { .. }
             | Intent::Hide { .. } => {
                 self.record(
-                    "private",
+                    "feedback",
                     Some(id),
                     Some(room),
                     self.text(
@@ -3141,6 +3462,7 @@ impl Engine {
                 )?;
             }
             Intent::Work { recipe } => {
+                let origin = TextOrigin::Recipe(*recipe);
                 let recipe = recipe_spec(*recipe);
                 let ingredient = self
                     .ingredient(id, recipe.ingredient)
@@ -3161,6 +3483,7 @@ impl Engine {
                     visible: true,
                     key: None,
                     power: recipe.power,
+                    text_origin: Some(origin),
                     poisoned_by: None,
                     causes: vec![],
                 };
@@ -3248,10 +3571,14 @@ impl Engine {
                 match mode {
                     UseMode::Heal => {
                         let target = self.actor_mut(*target_id)?;
+                        let before = target.health;
+                        let was_unconscious = target.flags & UNCONSCIOUS != 0;
                         target.health = clamp(target.health + item.power);
+                        let healed = target.health - before;
                         target.flags &= !UNCONSCIOUS;
                         target.unconscious_until = None;
                         target.invalidate_decision()?;
+                        let had_poison = self.world.poison.iter().any(|p| p.actor_id == *target_id);
                         self.world.poison.retain(|p| p.actor_id != *target_id);
                         let item_name = self.name(*item_id);
                         self.consume(*item_id)?;
@@ -3261,18 +3588,32 @@ impl Engine {
                             Some(room),
                             self.text(
                                 &format!(
-                                    "{name} treats {} with {item_name}.",
-                                    self.name(*target_id)
+                                    "{name} treats {} with {item_name}: +{} HP{}; consumed 1 unit.",
+                                    self.name(*target_id), number_text(healed), if was_unconscious { "; conscious" } else { "" }
                                 ),
                                 &format!(
-                                    "{name} leczy osobę {} przy użyciu {item_name}.",
-                                    self.name(*target_id)
+                                    "{name} leczy osobę {} przy użyciu {item_name}: +{} HP{}; zużyto 1 sztukę.",
+                                    self.name(*target_id), number_text(healed), if was_unconscious { "; przytomność" } else { "" }
                                 ),
                             ),
                             None,
                             causes,
                             None,
                         )?;
+                        if had_poison {
+                            self.record(
+                                "private",
+                                Some(id),
+                                Some(room),
+                                self.text(
+                                    "Treatment removed your poisoning.",
+                                    "Leczenie usunęło twoje zatrucie.",
+                                ),
+                                Some(vec![*target_id]),
+                                vec![],
+                                None,
+                            )?;
+                        }
                         self.request_decision(
                             *target_id,
                             self.text(
@@ -3348,14 +3689,11 @@ impl Engine {
                     }
                     UseMode::PickLock => {
                         let lock = self.door(*target_id).context("Missing lock.")?.lock.clone();
-                        let chance =
-                            (0.3 + actor.skills.craft / 150.0 + actor.skills.stealth / 300.0
-                                - if lock.as_deref() == Some("royal") {
-                                    0.3
-                                } else {
-                                    0.0
-                                })
-                            .clamp(0.1, 0.9);
+                        let chance = lockpick_chance(
+                            actor.skills.craft,
+                            actor.skills.stealth,
+                            lock.as_deref() == Some("royal"),
+                        );
                         if self.random() < chance {
                             self.world
                                 .doors
@@ -3414,7 +3752,7 @@ impl Engine {
                                     )?;
                                 }
                             }
-                            self.actor_mut(id)?.plan.clear();
+                            self.actor_mut(id)?.clear_plan();
                             return Ok(ActionResult::fail(self.text(
                                 "The lock resists your attempt.",
                                 "Zamek opiera się twojej próbie.",
@@ -3422,48 +3760,11 @@ impl Engine {
                         }
                     }
                     UseMode::Disguise => {
-                        let old: Vec<_> = self
-                            .inventory(id)
-                            .into_iter()
-                            .filter(|i| {
-                                i.kind == ItemKind::Clothes && i.equipped && i.id != *item_id
-                            })
-                            .map(|i| i.id)
-                            .collect();
-                        for previous in old {
-                            self.world
-                                .items
-                                .iter_mut()
-                                .find(|i| i.id == previous)
-                                .context("Missing clothes.")?
-                                .equipped = false;
-                            self.actor_mut(id)?.equipment.retain(|i| *i != previous);
-                        }
-                        let item = self
-                            .world
-                            .items
-                            .iter_mut()
-                            .find(|i| i.id == *item_id)
-                            .context("Missing clothes.")?;
-                        item.equipped = true;
-                        item.visible = true;
-                        let actor = self.actor_mut(id)?;
-                        actor.flags |= DISGUISED;
-                        if !actor.equipment.contains(item_id) {
-                            actor.equipment.push(*item_id);
-                        }
-                        self.record(
-                            "action",
-                            Some(id),
-                            Some(room),
-                            self.text(
-                                &format!("{name} changes into {}.", self.name(*item_id)),
-                                &format!("{name} przebiera się w {}.", self.name(*item_id)),
-                            ),
-                            None,
+                        return self.execute_action(
+                            id,
+                            &Intent::Equip { item_id: *item_id },
                             causes,
-                            None,
-                        )?;
+                        );
                     }
                     UseMode::Trap => {
                         self.consume(*item_id)?;
@@ -3489,29 +3790,13 @@ impl Engine {
                         });
                     }
                     UseMode::CutBonds => {
-                        self.actor_mut(*target_id)?.flags &= !RESTRAINED;
-                        self.actor_mut(*target_id)?.invalidate_decision()?;
-                        self.record(
-                            "action",
-                            Some(id),
-                            Some(room),
-                            self.text(
-                                &format!("{name} cuts {}’s bonds.", self.name(*target_id)),
-                                &format!("{name} przecina więzy osoby {}.", self.name(*target_id)),
-                            ),
-                            None,
+                        return self.execute_action(
+                            id,
+                            &Intent::Release {
+                                target_id: *target_id,
+                            },
                             causes,
-                            None,
-                        )?;
-                        self.request_decision(
-                            *target_id,
-                            self.text(
-                                "Your bonds have been cut.",
-                                "Twoje więzy zostały przecięte.",
-                            ),
-                            false,
-                            false,
-                        )?;
+                        );
                     }
                 }
             }
@@ -3602,6 +3887,13 @@ impl Engine {
                     room_id: listener.room_id,
                     source_id: if recognized { Some(id) } else { None },
                     text: format!("{speaker}{qualifier}: “{heard}”"),
+                    details: Some(EventDetails::Speech {
+                        speaker_name: recognized.then(|| name.clone()),
+                        recipient_id: None,
+                        recipient_name: None,
+                        recipient_known: false,
+                        volume,
+                    }),
                 });
                 audience.push(listener.id);
             }
@@ -3619,6 +3911,13 @@ impl Engine {
                 "speech"
             }),
             perceptions,
+            Some(EventDetails::Speech {
+                speaker_name: Some(name.clone()),
+                recipient_id: target,
+                recipient_name: target.map(|id| self.name(id)),
+                recipient_known: true,
+                volume,
+            }),
         )?;
         if let Some(plot) = plot {
             let plot_id = self.world.next_plot_id as u16;
@@ -3834,6 +4133,50 @@ impl Engine {
                     let failure = if s.actor(actor_id)?.awake() {
                         let result =
                             s.execute(actor_id, activity.intent, activity.causes.clone())?;
+                        if result.ok
+                            && let Some(before) = activity.started_vitals
+                        {
+                            let actor = s.actor(actor_id)?;
+                            let after = [actor.health, actor.hunger, actor.thirst, actor.fatigue];
+                            let changes = before
+                                .iter()
+                                .zip(after)
+                                .zip(["HP", "hunger", "thirst", "fatigue"])
+                                .map(|((before, after), label)| {
+                                    format!(
+                                        "{} {:+.2}",
+                                        s.text(
+                                            label,
+                                            match label {
+                                                "hunger" => "głód",
+                                                "thirst" => "pragnienie",
+                                                "fatigue" => "zmęczenie",
+                                                _ => "HP",
+                                            }
+                                        ),
+                                        after - before
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" · ");
+                            let message = s.text(
+                                &format!("Net changes during the activity: {changes}."),
+                                &format!("Łączne zmiany w czasie działania: {changes}."),
+                            );
+                            let room = actor.room_id;
+                            s.record(
+                                "feedback",
+                                Some(actor_id),
+                                Some(room),
+                                message.clone(),
+                                Some(vec![actor_id]),
+                                activity.causes.clone(),
+                                None,
+                            )?;
+                            if let Some(outcome) = &mut s.actor_mut(actor_id)?.last_action_outcome {
+                                outcome.reason.push_str(&format!(" {message}"));
+                            }
+                        }
                         (!result.ok).then_some(result.message)
                     } else {
                         None
@@ -3999,11 +4342,21 @@ impl Engine {
                     | Intent::Hide { .. }
                     | Intent::Defend { .. }
             );
+        let stage = if !result.ok {
+            OutcomeStage::Failed
+        } else if completed {
+            OutcomeStage::Resolved
+        } else if intent.combat_move() && self.encounter(id).is_some() {
+            OutcomeStage::Accepted
+        } else {
+            OutcomeStage::Started
+        };
         let outcome = ActionOutcome {
             intent,
             ok: result.ok,
             reason: result.message.clone(),
             time: self.world.time,
+            stage,
         };
         let actor = self.actor_mut(id)?;
         actor.last_action_outcome = Some(outcome.clone());
@@ -4013,6 +4366,34 @@ impl Engine {
         if progress {
             actor.correction_used = false;
         }
+        Ok(())
+    }
+    fn interrupt_activity(&mut self, id: u16) -> Result<()> {
+        let Some(activity) = self.actor_mut(id)?.activity.take() else {
+            return Ok(());
+        };
+        let message = self.text(
+            &format!("Interrupted: {}.", self.action_verb(&activity.intent)),
+            &format!("Przerwano: {}.", self.action_verb(&activity.intent)),
+        );
+        let room = self.actor(id)?.room_id;
+        self.record(
+            "feedback",
+            Some(id),
+            Some(room),
+            message.clone(),
+            Some(vec![id]),
+            activity.causes,
+            None,
+        )?;
+        let time = self.world.time;
+        self.actor_mut(id)?.last_action_outcome = Some(ActionOutcome {
+            intent: activity.intent,
+            ok: false,
+            reason: message,
+            time,
+            stage: OutcomeStage::Interrupted,
+        });
         Ok(())
     }
     pub fn claim_correction(&mut self, id: u16) -> Result<bool> {
@@ -4031,7 +4412,7 @@ impl Engine {
         completed: bool,
     ) -> Result<()> {
         if failure.is_some() {
-            self.actor_mut(id)?.plan.clear();
+            self.actor_mut(id)?.clear_plan();
         }
         let mut steps = 0;
         while !self.actor(id)?.plan.is_empty()
@@ -4041,14 +4422,17 @@ impl Engine {
         {
             steps += 1;
             ensure!(steps <= 6, "Action plan exceeded its maximum length.");
-            let intent = self.actor_mut(id)?.plan.remove(0);
-            if let Err(error) = self.validate_intent(id, &intent) {
+            let mut intent = self.actor_mut(id)?.plan.remove(0);
+            if let Err(error) = intent
+                .resolve_item(self.actor(id)?.last_acquired_item_id)
+                .and_then(|()| self.validate_intent(id, &intent))
+            {
                 self.remember_outcome(id, intent, &ActionResult::fail(error.to_string()), false)?;
                 failure = Some(error.to_string());
-                self.actor_mut(id)?.plan.clear();
+                self.actor_mut(id)?.clear_plan();
                 let room = self.actor(id)?.room_id;
                 self.record(
-                    "private",
+                    "feedback",
                     Some(id),
                     Some(room),
                     self.text(
@@ -4065,7 +4449,7 @@ impl Engine {
             if !result.ok {
                 self.remember_outcome(id, intent, &result, false)?;
                 failure = Some(result.message);
-                self.actor_mut(id)?.plan.clear();
+                self.actor_mut(id)?.clear_plan();
                 break;
             }
             if self.encounter(id).is_some() {
@@ -4076,6 +4460,9 @@ impl Engine {
             && self.actor(id)?.awake()
             && self.encounter(id).is_none()
         {
+            if self.actor(id)?.plan.is_empty() {
+                self.actor_mut(id)?.last_acquired_item_id = 0;
+            }
             let cause = if failure.is_some() {
                 WakeCause::PlanFailed
             } else {
@@ -4143,6 +4530,7 @@ impl Engine {
             }
         };
         if check_text(&interpretation.summary, 300).is_err()
+            || check_new_plan(&interpretation.plan).is_err()
             || interpretation.plan.len() > 3
             || interpretation
                 .plan
@@ -4194,6 +4582,7 @@ impl Engine {
             .value());
         }
         self.mutate(|s| {
+            s.actor_mut(id)?.last_acquired_item_id = 0;
             s.actor_mut(id)?.plan =
                 if s.encounter(id).is_some() || matches!(first, Intent::Attack { .. }) {
                     vec![]
@@ -4210,17 +4599,21 @@ impl Engine {
     }
     pub fn cancel_player_plan(&mut self, id: u16) -> Result<()> {
         self.mutate(|s| {
-            let player = s.actor_mut(id)?;
-            player.plan.clear();
-            if player.activity.as_ref().is_some_and(|a| a.intent.long()) {
-                player.activity = None;
+            if s.actor(id)?
+                .activity
+                .as_ref()
+                .is_some_and(|a| a.intent.long())
+            {
+                s.interrupt_activity(id)?;
             }
+            let player = s.actor_mut(id)?;
+            player.clear_plan();
             Ok(())
         })
     }
     pub fn clear_player_plan(&mut self, id: u16) -> Result<()> {
         self.mutate(|s| {
-            s.actor_mut(id)?.plan.clear();
+            s.actor_mut(id)?.clear_plan();
             Ok(())
         })
     }
@@ -4388,10 +4781,14 @@ impl Engine {
             return Ok(ActionResult::fail(error.to_string()).value());
         }
         self.mutate(|s| {
+            if !preserve_activity {
+                s.interrupt_activity(id)?;
+            }
             let actor = s.actor_mut(id)?;
             actor.summary = decision.summary;
             actor.goals = decision.goals;
             if !preserve_activity {
+                actor.last_acquired_item_id = 0;
                 actor.activity = None;
                 actor.plan = if in_combat {
                     vec![]
@@ -4410,6 +4807,7 @@ impl Engine {
                     importance: memory.importance,
                     source_id: Some(id),
                     evidence_ids: memory.evidence_ids,
+                    perceived: None,
                 })?;
             }
             for update in decision.relationships {
@@ -4556,15 +4954,26 @@ impl Engine {
                 .collect::<Vec<_>>()
                 .join(" ")
         );
-        let dialogue = self.store.recent_dialogue(id, 8, 4)?;
-        let dialogue_ids = dialogue.iter().map(|memory| memory.id).collect::<Vec<_>>();
-        let memories = self.store.recall_excluding(id, &query, 24, &dialogue_ids)?;
-        let mut evidence: Vec<_> = memories.iter().chain(&dialogue).map(|m| m.id).collect();
+        let room_context = crate::room_context::room_context(
+            &self.store,
+            actor,
+            self.world.time,
+            &self.language,
+            crate::room_context::ContextBudget::default(),
+        )?;
+        let memories = self.store.recall_with_ranges(
+            id,
+            &query,
+            [6, 10, 8],
+            &room_context.excluded_ranges(),
+        )?;
+        let mut evidence = room_context.evidence_ids();
+        evidence.extend(memories.iter().map(|m| m.id));
         evidence.sort_unstable();
         evidence.dedup();
         let doors = self.door_views(id)?;
         let items=self.visible_items(id)?.iter().map(|item|{
-            let mut value=json!({"id":item.id,"name":self.name(item.id),"description":self.authored(&item.description),"kind":item.kind,"quantity":item.quantity,"ownerId":item.owner_id,"equipped":item.equipped,"poisonRecognized":item.poisoned_by.is_some() && (item.poisoned_by==Some(id) || actor.skills.medicine>=60.0)});
+            let mut value=json!({"id":item.id,"name":self.name(item.id),"description":self.item_text(item, "description"),"kind":item.kind,"quantity":item.quantity,"ownerId":item.owner_id,"equipped":item.equipped,"poisonRecognized":item.poisoned_by.is_some() && (item.poisoned_by==Some(id) || actor.skills.medicine>=60.0)});
             if item.owner_id==Some(id){value["key"]=json!(item.key);}value
         }).collect::<Vec<_>>();
         let people=self.nearby(id)?.iter().filter(|a|a.id!=id).map(|person|json!({"id":person.id,"name":self.name(person.id),"role":self.role(person),"condition":self.condition(person),"activity":self.activity_text(person),"equipment":self.visible_items(id).unwrap_or_default().iter().filter(|i|i.owner_id==Some(person.id)).map(|i|json!({"id":i.id,"name":self.name(i.id)})).collect::<Vec<_>>()})).collect::<Vec<_>>();
@@ -4606,9 +5015,9 @@ impl Engine {
                 value
             })
             .collect::<Vec<_>>();
-        let available_actions = self
-            .actions(id)?
-            .into_iter()
+        let action_details = self.actions(id)?;
+        let available_actions = action_details
+            .iter()
             .filter(|action| action["available"] == true)
             .map(|action| action["intent"].clone())
             .collect::<Vec<_>>();
@@ -4623,14 +5032,35 @@ impl Engine {
                     .is_ok()
             );
         }
-        Ok(
-            json!({"context":{"branch":self.world.branch,"version":actor.decision_version,"evidenceIds":evidence,"combat":self.combat_context(id)},"input":{"language":self.language,"scenarioId":self.world.scenario_id,"time":self.world.time,"timeRules":{"calendarSecondsPerRealSecond":CLOCK_RATE,"activitySecondsAre":"calendar","reactionSchedulingUses":"real seconds"},"reason":reason,"combat":self.combat_view(id)?,"speechRule":if self.world.mode=="multiplayer"{"Normal speech stays in this room. Shouts reach adjoining rooms, with partially heard words. Never whisper."}else{"Speech follows normal, whisper and shout perception."},"self":{"id":id,"name":described["name"],"aliases":if self.is_player(id){vec![]}else{self.content.aliases(id)},"role":described["role"],"biography":described["biography"],"personality":described["personality"],"health":actor.health,"hunger":actor.hunger,"thirst":actor.thirst,"fatigue":actor.fatigue,"coins":actor.coins,"skills":actor.skills,"condition":self.condition(actor),"goals":described["goals"],"relationships":actor.relationships,"lastSummary":described["summary"],"activity":self.activity_text(actor),"currentActivity":self.current_activity(actor),"remainingPlan":actor.plan,"commitments":commitments,"lastActionOutcome":actor.last_action_outcome,"lastPlanFailure":actor.last_plan_failure},"room":self.describe_room(actor.room_id)?,"doors":doors,"people":people,"items":items,"knownPeople":known_people,"knownMap":known_map,"offers":self.world.offers.iter().filter(|o|o.to==id && o.status=="open" && !self.offer_expired(o)).collect::<Vec<_>>(),"plots":plots,"memories":memories.iter().map(|m|self.describe_memory(m)).collect::<Vec<_>>(),"recentDialogue":dialogue.iter().map(|m|self.describe_memory(m)).collect::<Vec<_>>(),"recipes":recipes,"availableActions":available_actions}}),
-        )
+        Ok(json!({
+            "context":{"branch":self.world.branch,"version":actor.decision_version,"evidenceIds":evidence,"combat":self.combat_context(id)},
+            "input":{
+                "language":self.language,"scenarioId":self.world.scenario_id,
+                "world":{
+                    "time":self.world.time,
+                    "self":{"id":id,"name":described["name"],"aliases":if self.is_player(id){vec![]}else{self.content.aliases(id)},"role":described["role"],"biography":described["biography"],"personality":described["personality"],"coins":actor.coins,"condition":self.condition(actor),"goals":described["goals"],"relationships":actor.relationships,"lastSummary":described["summary"],"activity":self.activity_text(actor),"commitments":commitments},
+                    "room":self.describe_room(actor.room_id)?,"doors":doors,"people":people,"items":items,
+                    "knownPeople":known_people,"knownMap":known_map,
+                    "offers":self.world.offers.iter().filter(|o|o.to==id && o.status=="open" && !self.offer_expired(o)).collect::<Vec<_>>(),
+                    "plots":plots,"memories":memories.iter().map(|m|self.describe_memory(m)).collect::<Vec<_>>(),"roomContext":room_context
+                },
+                "execution":{
+                    "reason":reason,
+                    "timeRules":{"calendarSecondsPerRealSecond":CLOCK_RATE,"physiologySecondsPerRealSecond":PHYSIOLOGY_RATE,"activitySecondsAre":"calendar","reactionSchedulingUses":"real seconds"},
+                    "speechRule":if self.world.mode=="multiplayer"{"Normal speech stays in this room. Shouts reach adjoining rooms, with partially heard words. Never whisper."}else{"Speech follows normal, whisper and shout perception."},
+                    "combat":self.combat_view(id)?,
+                    "people":self.nearby(id)?.iter().filter(|a|a.id!=id).map(|person|json!({"id":person.id,"health":person.health})).collect::<Vec<_>>(),
+                    "self":{"health":actor.health,"hunger":actor.hunger,"thirst":actor.thirst,"fatigue":actor.fatigue,"skills":actor.skills,"currentActivity":self.current_activity(actor),"remainingPlan":actor.plan,"lastActionOutcome":actor.last_action_outcome,"lastPlanFailure":actor.last_plan_failure},
+                    "recipes":recipes,"availableActions":available_actions,
+                    "actionDetails":action_details.iter().map(|action|json!({"intent":action["intent"],"available":action["available"],"reason":action.get("reason"),"forecast":action["forecast"]})).collect::<Vec<_>>()
+                }
+            }
+        }))
     }
 
     fn door_views(&self, id: u16) -> Result<Vec<Value>> {
         let room = self.actor(id)?.room_id;
-        Ok(self.exits(room).iter().map(|door|json!({"id":door.id,"name":self.name(door.id),"destination":self.name(self.destination(door,room)),"destinationId":self.destination(door,room),"open":door.flags&OPEN!=0,"locked":door.flags&LOCKED!=0,"restricted":door.restricted})).collect())
+        Ok(self.exits(room).iter().map(|door|json!({"id":door.id,"name":self.name(door.id),"destination":self.name(self.destination(door,room)),"destinationId":self.destination(door,room),"open":door.flags&OPEN!=0,"locked":door.flags&LOCKED!=0})).collect())
     }
     pub fn travel_view(&self, id: u16) -> Result<Value> {
         let actor = self.actor(id)?;
@@ -4699,7 +5129,7 @@ impl Engine {
             })
             .filter_map(|p| self.actor(p.actor_id).ok())
             .filter(|a| a.alive() && a.room_id == encounter.room_id)
-            .map(|a| json!({"id":a.id,"name":self.name(a.id),"condition":self.condition(a)}))
+            .map(|a| json!({"id":a.id,"name":self.name(a.id),"condition":self.condition(a),"health":a.health}))
             .collect::<Vec<_>>();
         let participants = encounter
             .participants
@@ -4707,7 +5137,7 @@ impl Engine {
             .filter(|p| p.actor_id != id)
             .filter_map(|p| self.actor(p.actor_id).ok())
             .filter(|a| a.alive() && a.room_id == encounter.room_id)
-            .map(|a| json!({"id":a.id,"name":self.name(a.id),"condition":self.condition(a)}))
+            .map(|a| json!({"id":a.id,"name":self.name(a.id),"condition":self.condition(a),"health":a.health}))
             .collect::<Vec<_>>();
         let mut choices = Vec::new();
         for other in self
@@ -4757,13 +5187,18 @@ impl Engine {
             Intent::Move { door_id } => format!("/go {}", destination(*door_id)),
             Intent::Flee { door_id } => format!("/flee {}", destination(*door_id)),
             Intent::Inspect { target_id } => format!("/inspect {}", self.name(*target_id)),
-            Intent::Take { item_id }
-            | Intent::Steal { item_id }
-            | Intent::Drop { item_id }
+            Intent::Take { item_id, .. }
+            | Intent::Steal { item_id, .. }
+            | Intent::Drop { item_id, .. }
             | Intent::Equip { item_id }
             | Intent::Eat { item_id }
             | Intent::Drink { item_id } => format!("/{} {}", intent.kind(), self.name(*item_id)),
-            Intent::Give { item_id, target_id } | Intent::Offer { item_id, target_id } => format!(
+            Intent::Give {
+                item_id, target_id, ..
+            }
+            | Intent::Offer {
+                item_id, target_id, ..
+            } => format!(
                 "/{} {} to {}",
                 intent.kind(),
                 self.name(*item_id),
@@ -4837,6 +5272,404 @@ impl Engine {
             Intent::Speak { .. } => "/say".into(),
         }
     }
+    fn action_applicable(&self, id: u16, intent: &Intent) -> bool {
+        let item = intent.item_id().and_then(|id| self.item(id));
+        let target = intent.target_id().and_then(|id| self.actor(id).ok());
+        match intent {
+            Intent::Guard { .. }
+            | Intent::Use {
+                mode: UseMode::Disguise | UseMode::CutBonds,
+                ..
+            } => false,
+            Intent::Steal { .. } => item.is_some_and(|i| {
+                i.owner_id
+                    .is_some_and(|owner| owner != id && self.actor(owner).is_ok_and(Actor::alive))
+            }),
+            Intent::Equip { .. } => {
+                item.is_some_and(|i| matches!(i.kind, ItemKind::Weapon | ItemKind::Clothes))
+            }
+            Intent::Eat { .. } => item.is_some_and(|i| i.kind == ItemKind::Food),
+            Intent::Drink { .. } => item.is_some_and(|i| i.kind == ItemKind::Water),
+            Intent::Attack { .. } => target.is_some_and(|a| a.id != id && a.alive()),
+            Intent::Bind { .. } => {
+                target.is_some_and(|a| a.flags & UNCONSCIOUS != 0 && a.flags & RESTRAINED == 0)
+            }
+            Intent::Release { .. } | Intent::Escort { .. } => {
+                target.is_some_and(|a| a.flags & RESTRAINED != 0)
+            }
+            Intent::Defend { .. } => self.encounter(id).is_some(),
+            Intent::Work { recipe } => self
+                .actor(id)
+                .is_ok_and(|a| a.room_id == recipe_spec(*recipe).room),
+            Intent::Use {
+                mode: UseMode::PickLock,
+                target_id,
+                ..
+            } => self
+                .door(*target_id)
+                .is_some_and(|door| door.flags & LOCKED != 0),
+            _ => true,
+        }
+    }
+    fn action_arguments(&self, id: u16, intent: &Intent) -> Vec<Value> {
+        let entity = |entity_id, prefix: &str, value: String| json!({"value":value,"prefix":prefix,"entityId":entity_id});
+        let named = |entity_id, prefix| entity(entity_id, prefix, self.name(entity_id));
+        let destination = |door_id, prefix| {
+            entity(
+                door_id,
+                prefix,
+                self.door(door_id).map_or_else(
+                    || door_id.to_string(),
+                    |door| {
+                        self.name(
+                            self.destination(door, self.actor(id).map_or(DUNGEON, |a| a.room_id)),
+                        )
+                    },
+                ),
+            )
+        };
+        match intent {
+            Intent::Move { door_id } | Intent::Flee { door_id } => vec![destination(*door_id, "")],
+            Intent::Give {
+                item_id, target_id, ..
+            }
+            | Intent::Offer {
+                item_id, target_id, ..
+            } => vec![named(*item_id, ""), named(*target_id, "to")],
+            Intent::Use {
+                item_id, target_id, ..
+            } => vec![named(*target_id, ""), named(*item_id, "with")],
+            Intent::Escort { target_id, door_id } => {
+                vec![named(*target_id, ""), destination(*door_id, "to")]
+            }
+            Intent::Pay { target_id, amount } => vec![
+                named(*target_id, ""),
+                json!({"value":amount.to_string(),"prefix":"","field":"amount","minimum":1,"maximum":1000}),
+            ],
+            Intent::AcceptOffer { offer_id } | Intent::DeclineOffer { offer_id } => vec![entity(
+                *offer_id,
+                "",
+                self.world
+                    .offers
+                    .iter()
+                    .find(|offer| offer.id == *offer_id)
+                    .map_or_else(|| offer_id.to_string(), |offer| self.name(offer.from)),
+            )],
+            Intent::Inspect { target_id }
+            | Intent::Attack { target_id, .. }
+            | Intent::Bind { target_id }
+            | Intent::Release { target_id } => vec![named(*target_id, "")],
+            Intent::Unlock { door_id }
+            | Intent::Lock { door_id }
+            | Intent::Open { door_id }
+            | Intent::Close { door_id } => vec![named(*door_id, "")],
+            Intent::Work { recipe } => vec![
+                json!({"value":match recipe { Recipe::Meal => "meal", Recipe::Lockpick => "lockpick", Recipe::Medicine => "medicine" },"prefix":""}),
+            ],
+            _ => intent
+                .item_id()
+                .map_or_else(Vec::new, |item| vec![named(item, "")]),
+        }
+    }
+    fn action_forecast(&self, id: u16, intent: &Intent) -> Value {
+        let Ok(actor) = self.actor(id) else {
+            return Value::Null;
+        };
+        let item = intent.item_id().and_then(|id| self.item(id));
+        let mut effects = Vec::new();
+        let mut hints = Vec::new();
+        let (mut calendar, mut real) = self.action_duration(intent);
+        let encounter = self.encounter(id).or_else(|| {
+            self.world
+                .encounters
+                .iter()
+                .find(|e| e.room_id == actor.room_id)
+        });
+        let combat_timing = intent.combat_move()
+            && (encounter.is_some() || matches!(intent, Intent::Attack { .. }));
+        if combat_timing {
+            real = encounter.map_or(self.tuning.combat_round_seconds, |encounter| {
+                let next_round = encounter
+                    .participants
+                    .iter()
+                    .find(|p| p.actor_id == id)
+                    .is_none_or(|p| p.joins_round > encounter.round);
+                (encounter.deadline - self.world.interaction_time).max(0.0)
+                    + if next_round {
+                        self.tuning.combat_round_seconds
+                    } else {
+                        0.0
+                    }
+            });
+            if matches!(intent, Intent::Flee { .. }) {
+                real += self.tuning.travel_seconds;
+            }
+            calendar = real * CLOCK_RATE;
+        }
+        match intent {
+            Intent::Eat { .. } | Intent::Drink { .. } => {
+                if let Some(item) = item {
+                    let eating = matches!(intent, Intent::Eat { .. });
+                    let before = if eating { actor.hunger } else { actor.thirst };
+                    let delta = clamp(before - item.power) - before;
+                    effects.push(json!({"stat":if eating {"hunger"} else {"thirst"},"delta":delta,"consumes":1}));
+                    hints.push(self.text(
+                        &format!(
+                            "{} −{} · 1 unit",
+                            if eating { "hunger" } else { "thirst" },
+                            number_text(-delta)
+                        ),
+                        &format!(
+                            "{} −{} · 1 szt.",
+                            if eating { "głód" } else { "pragnienie" },
+                            number_text(-delta)
+                        ),
+                    ));
+                }
+            }
+            Intent::Use {
+                target_id,
+                mode: UseMode::Heal,
+                ..
+            } => {
+                if let (Some(item), Ok(target)) = (item, self.actor(*target_id)) {
+                    let delta = clamp(target.health + item.power) - target.health;
+                    effects.push(
+                        json!({"stat":"health","targetId":target_id,"delta":delta,"consumes":1}),
+                    );
+                    effects
+                        .push(json!({"clears":["unconscious","poison"],"condition":"if_present"}));
+                    hints.push(self.text(
+                        &format!(
+                            "HP +{} · treats unconsciousness/poison if present · 1 unit",
+                            number_text(delta)
+                        ),
+                        &format!(
+                            "HP +{} · leczy nieprzytomność/zatrucie, jeśli występują · 1 szt.",
+                            number_text(delta)
+                        ),
+                    ));
+                }
+            }
+            Intent::Attack { target_id, style } => {
+                if let Ok(target) = self.actor(*target_id) {
+                    let weapon = self
+                        .inventory(id)
+                        .iter()
+                        .filter(|i| i.kind == ItemKind::Weapon && i.equipped)
+                        .map(|i| i.power)
+                        .fold(0.0, f64::max);
+                    let projected_loss = |skill, defending| {
+                        let damage = attack_damage(
+                            actor.skills.combat,
+                            weapon,
+                            actor.flags & HIDDEN != 0,
+                            actor.fatigue,
+                            skill,
+                            defending,
+                        );
+                        target.health
+                            - if *style == AttackStyle::Subdue && target.health - damage <= 20.0 {
+                                subdued_health(target.health, damage)
+                            } else {
+                                clamp(target.health - damage)
+                            }
+                    };
+                    // Opponent skill and chosen move remain private. These bounds use
+                    // the skill domain, not this opponent's actual hidden values.
+                    let (lo, hi) = (projected_loss(100.0, false), projected_loss(0.0, false));
+                    let (def_lo, def_hi) = if target.awake() {
+                        (projected_loss(100.0, true), projected_loss(0.0, true))
+                    } else {
+                        (lo, hi)
+                    };
+                    effects.push(json!({"stat":"health","targetId":target_id,"loss":{"minimum":lo,"maximum":hi},"ifDefending":{"minimum":def_lo,"maximum":def_hi},"prediction":"conditional"}));
+                    hints.push(self.text(
+                        &format!(
+                            "damage {}–{} HP · if defending {}–{}",
+                            number_text(lo),
+                            number_text(hi),
+                            number_text(def_lo),
+                            number_text(def_hi)
+                        ),
+                        &format!(
+                            "obrażenia {}–{} HP · przy obronie {}–{}",
+                            number_text(lo),
+                            number_text(hi),
+                            number_text(def_lo),
+                            number_text(def_hi)
+                        ),
+                    ));
+                    if *style == AttackStyle::Subdue {
+                        hints.push(self.text(
+                            "nonlethal; may knock unconscious",
+                            "nieśmiertelne; możliwa nieprzytomność",
+                        ));
+                    }
+                }
+            }
+            Intent::Steal { .. } => {
+                let lo = theft_chance(
+                    actor.skills.stealth,
+                    actor.flags & HIDDEN != 0,
+                    100.0,
+                    100.0,
+                    0.0,
+                );
+                let hi = theft_chance(
+                    actor.skills.stealth,
+                    actor.flags & HIDDEN != 0,
+                    0.0,
+                    0.0,
+                    100.0,
+                );
+                effects.push(json!({"successChance":{"minimum":lo,"maximum":hi},"prediction":"owner_ability_unknown"}));
+                hints.push(self.text(
+                    &format!(
+                        "success {}–{}% · risk of discovery",
+                        number_text(lo * 100.0),
+                        number_text(hi * 100.0)
+                    ),
+                    &format!(
+                        "powodzenie {}–{}% · ryzyko wykrycia",
+                        number_text(lo * 100.0),
+                        number_text(hi * 100.0)
+                    ),
+                ));
+            }
+            Intent::Use {
+                mode: UseMode::PickLock,
+                ..
+            } => {
+                let lo = lockpick_chance(actor.skills.craft, actor.skills.stealth, true);
+                let hi = lockpick_chance(actor.skills.craft, actor.skills.stealth, false);
+                effects.push(json!({"successChance":{"minimum":lo,"maximum":hi},"consumes":0}));
+                hints.push(self.text(
+                    &format!(
+                        "success {}–{}% · reusable tool",
+                        number_text(lo * 100.0),
+                        number_text(hi * 100.0)
+                    ),
+                    &format!(
+                        "powodzenie {}–{}% · narzędzie pozostaje",
+                        number_text(lo * 100.0),
+                        number_text(hi * 100.0)
+                    ),
+                ));
+            }
+            Intent::Equip { .. } => {
+                if let Some(item) = item {
+                    hints.push(if item.kind == ItemKind::Clothes {
+                        self.text("disguise", "przebranie")
+                    } else {
+                        self.text(
+                            &format!("weapon power {}", number_text(item.power)),
+                            &format!("moc broni {}", number_text(item.power)),
+                        )
+                    });
+                    effects.push(json!({"equipped":true,"weaponPower":if item.kind==ItemKind::Weapon {Some(item.power)} else {None}}));
+                }
+            }
+            Intent::Defend { .. } => {
+                effects.push(json!({"incomingDamageMultiplier":0.5}));
+                hints.push(self.text(
+                    "incoming damage ×0.5 this round",
+                    "obrażenia otrzymane ×0,5 w tej rundzie",
+                ));
+            }
+            Intent::Rest { .. } => hints.push(self.text(
+                "fatigue falls; healing depends on needs and interruptions",
+                "zmęczenie maleje; leczenie zależy od potrzeb i przerwań",
+            )),
+            Intent::Wait { .. } => hints.push(self.text("time passes", "upływ czasu")),
+            Intent::Hide { .. } => hints.push(self.text(
+                "attempt concealment; may be noticed",
+                "próba ukrycia; możliwe wykrycie",
+            )),
+            Intent::Use {
+                mode: UseMode::Poison,
+                ..
+            } => hints.push(self.text(
+                "poison food/water · 1 dose",
+                "zatrucie jedzenia/wody · 1 dawka",
+            )),
+            Intent::Use {
+                mode: UseMode::Trap,
+                ..
+            } => hints.push(self.text("set tripline · 1 rope", "założenie pułapki · 1 lina")),
+            Intent::Bind { .. } => {
+                hints.push(self.text("restrained · 1 rope", "związanie · 1 lina"))
+            }
+            Intent::Release { .. } => {
+                hints.push(self.text("remove restraints", "rozwiązanie więzów"))
+            }
+            Intent::Work { recipe } => {
+                let spec = recipe_spec(*recipe);
+                hints.push(self.text(
+                    &format!("1 {:?} → 1 {}", spec.ingredient, spec.name),
+                    &format!("1 składnik → 1 {}", spec.polish_name),
+                ));
+            }
+            Intent::Pay { amount, .. } => hints.push(self.text(
+                &format!("transfer {amount} coins"),
+                &format!("przekazanie {amount} monet"),
+            )),
+            Intent::Move { .. } | Intent::Flee { .. } | Intent::Escort { .. } => {
+                hints.push(self.text("change room", "przejście do pomieszczenia"))
+            }
+            Intent::Open { .. } => hints.push(self.text("open door", "otwarcie drzwi")),
+            Intent::Close { .. } => hints.push(self.text("close door", "zamknięcie drzwi")),
+            Intent::Unlock { .. } => {
+                hints.push(self.text("unlock; key retained", "odblokowanie; klucz pozostaje"))
+            }
+            Intent::Lock { .. } => {
+                hints.push(self.text("lock; key retained", "zamknięcie na klucz; klucz pozostaje"))
+            }
+            Intent::Inspect { .. } => hints.push(self.text("observe", "oglądanie")),
+            Intent::AcceptOffer { .. } => {
+                hints.push(self.text("receive offered quantity", "otrzymanie oferowanej ilości"))
+            }
+            Intent::DeclineOffer { .. } => {
+                hints.push(self.text("decline; no transfer", "odrzucenie; bez przekazania"))
+            }
+            _ => {}
+        }
+        if let Some(quantity) = intent.quantity() {
+            let count = item
+                .map(|i| if quantity == 0 { i.quantity } else { quantity })
+                .unwrap_or(quantity);
+            effects
+                .push(json!({"quantity":count,"transfer":!matches!(intent, Intent::Offer { .. })}));
+            hints.push(self.text(&format!("{count} unit(s)"), &format!("{count} szt.")));
+        }
+        if real > 0.0 {
+            hints.push(self.text(
+                &format!(
+                    "{}{}s real / {}s calendar{}",
+                    if combat_timing { "up to " } else { "" },
+                    number_text(real),
+                    number_text(calendar),
+                    if combat_timing {
+                        "; round may resolve earlier"
+                    } else {
+                        ""
+                    }
+                ),
+                &format!(
+                    "{}{}s rzeczywistych / {}s świata{}",
+                    if combat_timing { "do " } else { "" },
+                    number_text(real),
+                    number_text(calendar),
+                    if combat_timing {
+                        "; runda może skończyć się wcześniej"
+                    } else {
+                        ""
+                    }
+                ),
+            ));
+        }
+        json!({"effects":effects,"durationCalendarSeconds":calendar,"durationRealSeconds":real,"durationKind":if combat_timing {"maximum"} else {"scheduled"},"hint":hints.join(" · ")})
+    }
     fn action_choice(
         &self,
         id: u16,
@@ -4844,6 +5677,9 @@ impl Engine {
         group: &str,
         polish_group: &str,
     ) -> Option<Value> {
+        if !self.action_applicable(id, &intent) {
+            return None;
+        }
         let readiness = self
             .validate_intent(id, &intent)
             .and_then(|()| self.check_busy(id, &intent));
@@ -4855,9 +5691,6 @@ impl Engine {
                 | Intent::Unlock { .. }
                 | Intent::Lock { .. }
         );
-        if readiness.is_err() && !door_command {
-            return None;
-        }
         let available = readiness.is_ok();
         let command = self.action_command(id, &intent);
         let label = if self.language == "pl" {
@@ -4879,7 +5712,21 @@ impl Engine {
             command.trim_start_matches('/').into()
         };
         let mut choice = json!({"label":label,"group":self.text(group,polish_group),
-            "intent":intent,"command":command,"available":available});
+            "intent":intent,"command":command,"available":available,"arguments":self.action_arguments(id, &intent),
+            "forecast":self.action_forecast(id, &intent)});
+        if intent.quantity().is_some() {
+            choice["quantityAvailable"] = json!(
+                intent
+                    .item_id()
+                    .and_then(|id| self.item(id))
+                    .map_or(0, |item| item.quantity)
+            );
+        }
+        choice["hint"] = choice["forecast"]["hint"].clone();
+        if let Err(error) = &readiness {
+            choice["status"] = json!("blocked");
+            choice["reason"] = json!(error.to_string());
+        }
         if door_command {
             let door = self.door(intent.door_id()?)?;
             let actor = self.actor(id).ok()?;
@@ -4916,6 +5763,16 @@ impl Engine {
                 choice["reason"] = json!(error.to_string());
             }
         }
+        choice["subLabel"] = json!(
+            [
+                choice["reason"].as_str().unwrap_or(""),
+                choice["forecast"]["hint"].as_str().unwrap_or("")
+            ]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ")
+        );
         Some(choice)
     }
     pub fn actions(&self, id: u16) -> Result<Vec<Value>> {
@@ -4954,22 +5811,44 @@ impl Engine {
                 "Inspect",
                 "Oglądanie",
             );
-            if item.owner_id != Some(id) {
-                add(Intent::Take { item_id: item.id }, "Items", "Przedmioty");
-                add(Intent::Steal { item_id: item.id }, "Items", "Przedmioty");
-                continue;
-            }
-            add(Intent::Drop { item_id: item.id }, "Items", "Przedmioty");
+            add(Intent::Eat { item_id: item.id }, "Needs", "Potrzeby");
+            add(Intent::Drink { item_id: item.id }, "Needs", "Potrzeby");
             if !item.equipped {
                 add(Intent::Equip { item_id: item.id }, "Items", "Przedmioty");
             }
-            add(Intent::Eat { item_id: item.id }, "Needs", "Potrzeby");
-            add(Intent::Drink { item_id: item.id }, "Needs", "Potrzeby");
+            if item.owner_id != Some(id) {
+                add(
+                    Intent::Take {
+                        item_id: item.id,
+                        quantity: 1,
+                    },
+                    "Items",
+                    "Przedmioty",
+                );
+                add(
+                    Intent::Steal {
+                        item_id: item.id,
+                        quantity: 1,
+                    },
+                    "Items",
+                    "Przedmioty",
+                );
+                continue;
+            }
+            add(
+                Intent::Drop {
+                    item_id: item.id,
+                    quantity: 1,
+                },
+                "Items",
+                "Przedmioty",
+            );
             for target in people.iter().filter(|a| a.id != id && a.alive()) {
                 add(
                     Intent::Offer {
                         item_id: item.id,
                         target_id: target.id,
+                        quantity: 1,
                     },
                     "Offers",
                     "Oferty",
@@ -4978,6 +5857,7 @@ impl Engine {
                     Intent::Give {
                         item_id: item.id,
                         target_id: target.id,
+                        quantity: 1,
                     },
                     "Offers",
                     "Oferty",
@@ -5027,15 +5907,6 @@ impl Engine {
                         );
                     }
                 }
-                ItemKind::Clothes => add(
-                    Intent::Use {
-                        item_id: item.id,
-                        target_id: id,
-                        mode: UseMode::Disguise,
-                    },
-                    "Use",
-                    "Używanie",
-                ),
                 ItemKind::Rope => {
                     for door in self.exits(actor.room_id) {
                         add(
@@ -5043,19 +5914,6 @@ impl Engine {
                                 item_id: item.id,
                                 target_id: door.id,
                                 mode: UseMode::Trap,
-                            },
-                            "Use",
-                            "Używanie",
-                        );
-                    }
-                }
-                ItemKind::Weapon => {
-                    for target in &people {
-                        add(
-                            Intent::Use {
-                                item_id: item.id,
-                                target_id: target.id,
-                                mode: UseMode::CutBonds,
                             },
                             "Use",
                             "Używanie",
@@ -5144,7 +6002,9 @@ impl Engine {
         add(Intent::Rest { seconds: 600 }, "Needs", "Potrzeby");
         add(Intent::Wait { seconds: 60 }, "Needs", "Potrzeby");
         add(Intent::Hide { seconds: 300 }, "Stealth", "Ukrywanie");
-        add(Intent::Defend { seconds: 60 }, "Combat", "Walka");
+        if self.encounter(id).is_some() {
+            add(Intent::Defend { seconds: 60 }, "Combat", "Walka");
+        }
         for recipe in [Recipe::Meal, Recipe::Lockpick, Recipe::Medicine] {
             add(Intent::Work { recipe }, "Work", "Praca");
         }
@@ -5179,6 +6039,64 @@ impl Engine {
                 choice["command"] = json!(format!("{command} #{ids}"));
             }
         }
+        let normalized = |text: &str| {
+            text.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .nfc()
+                .flat_map(char::to_lowercase)
+                .collect::<String>()
+        };
+        let mut argument_ids: BTreeMap<String, HashSet<u16>> = BTreeMap::new();
+        for choice in &choices {
+            let verb = choice["command"]
+                .as_str()
+                .unwrap_or_default()
+                .split_whitespace()
+                .next()
+                .unwrap_or_default();
+            let mut prefix = verb.to_owned();
+            for argument in choice["arguments"].as_array().into_iter().flatten() {
+                let value = argument["value"].as_str().unwrap_or_default();
+                let fixed = argument["prefix"].as_str().unwrap_or_default();
+                prefix.push_str(&format!(" {fixed} {value}"));
+                if let Some(id) = argument["entityId"].as_u64() {
+                    argument_ids
+                        .entry(normalized(&prefix))
+                        .or_default()
+                        .insert(id as u16);
+                }
+            }
+        }
+        for choice in &mut choices {
+            let verb = choice["command"]
+                .as_str()
+                .unwrap_or_default()
+                .split_whitespace()
+                .next()
+                .unwrap_or_default()
+                .to_owned();
+            let mut key = verb.clone();
+            let mut completed = verb;
+            for argument in choice["arguments"].as_array_mut().into_iter().flatten() {
+                let mut value = argument["value"].as_str().unwrap_or_default().to_owned();
+                let fixed = argument["prefix"].as_str().unwrap_or_default().to_owned();
+                key.push_str(&format!(" {fixed} {value}"));
+                if argument_ids
+                    .get(&normalized(&key))
+                    .is_some_and(|ids| ids.len() > 1)
+                    && let Some(id) = argument["entityId"].as_u64()
+                {
+                    value.push_str(&format!(" #{id}"));
+                    argument["value"] = json!(value);
+                }
+                if !fixed.is_empty() {
+                    completed.push_str(&format!(" {fixed}"));
+                }
+                completed.push_str(&format!(" {value}"));
+            }
+            choice["completionCommand"] = json!(completed);
+        }
         Ok(choices)
     }
     pub fn player_view(&self, id: u16) -> Result<Value> {
@@ -5188,7 +6106,7 @@ impl Engine {
             "Player view requires an owned character."
         );
         let visible = self.visible_items(id)?;
-        let actors=self.nearby(id)?.into_iter().filter(|a|a.id!=id).map(|a|json!({"id":a.id,"name":self.name(a.id),"role":self.role(a),"portraitKey":a.portrait_key,"condition":self.condition(a),"activity":self.activity_text(a),"equipment":visible.iter().filter(|i|i.owner_id==Some(a.id) && i.equipped).map(|i|self.name(i.id)).collect::<Vec<_>>()})).collect::<Vec<_>>();
+        let actors=self.nearby(id)?.into_iter().filter(|a|a.id!=id).map(|a|json!({"id":a.id,"name":self.name(a.id),"role":self.role(a),"portraitKey":a.portrait_key,"condition":self.condition(a),"health":a.health,"activity":self.activity_text(a),"equipment":visible.iter().filter(|i|i.owner_id==Some(a.id) && i.equipped).map(|i|self.name(i.id)).collect::<Vec<_>>()})).collect::<Vec<_>>();
         let events = self
             .store
             .events(Some(id), 80)?
@@ -5210,7 +6128,7 @@ impl Engine {
     }
     pub fn manager_view(&self, selected: Option<u16>) -> Result<Value> {
         let actors=self.world.actors.iter().filter(|a|self.world.mode=="multiplayer" || a.id!=PLAYER).map(|actor|{let mut value=self.describe_actor(actor);value["room"]=json!(self.name(actor.room_id));value["controller"]=json!(if self.is_player(actor.id){"human"}else{"ai"});value["connected"]=json!(false);value["status"]=json!({"actorId":actor.id,"state":if !actor.alive(){"dead"}else if actor.activity.is_some(){"acting"}else{"idle"},"reason":self.activity_text(actor),"startedAt":null,"elapsedMs":0,"calls":0,"tokens":0,"lastLatencyMs":null,"error":null});value}).collect::<Vec<_>>();
-        let selected=selected.and_then(|id|self.actor(id).ok()).map(|actor|->Result<Value>{let inventory=self.inventory(actor.id).iter().map(|item|{let mut value=json!(item);value["name"]=json!(self.name(item.id));value["description"]=json!(self.authored(&item.description));value}).collect::<Vec<_>>();Ok(json!({"actor":self.describe_actor(actor),"memories":self.store.memories(actor.id,100)?.iter().map(|m|self.describe_memory(m)).collect::<Vec<_>>(),"inventory":inventory}))}).transpose()?.unwrap_or(Value::Null);
+        let selected=selected.and_then(|id|self.actor(id).ok()).map(|actor|->Result<Value>{let inventory=self.inventory(actor.id).iter().map(|item|{let mut value=json!(item);value["name"]=json!(self.name(item.id));value["description"]=json!(self.item_text(item, "description"));value}).collect::<Vec<_>>();Ok(json!({"actor":self.describe_actor(actor),"memories":self.store.memories(actor.id,100)?.iter().map(|m|self.describe_memory(m)).collect::<Vec<_>>(),"inventory":inventory}))}).transpose()?.unwrap_or(Value::Null);
         Ok(
             json!({"language":self.language,"scenarioId":self.world.scenario_id,"branch":self.world.branch,"time":self.world.time,"clock":clock_text(self.world.time,&self.language),"paused":if self.world.manual_pause{vec![self.text("Paused","Wstrzymano")]}else{vec![]},"ending":self.world.ending,"actors":actors,"events":self.store.events(None,50)?,"selected":selected,"saves":self.store.save_summaries()?,"metrics":{"calls":0,"tokens":0,"p50":null,"p95":null,"active":0},"error":null,"model":MODEL,"effort":EFFORT,"serviceTier":"default","listener":{"enabled":false,"state":"idle","queued":0,"text":"","summary":"","plan":[],"error":null}}),
         )
@@ -5247,6 +6165,7 @@ impl Engine {
         candidate.world.language = language.into();
         candidate.world.manual_pause = true;
         Self::restore_portraits(&mut candidate.world);
+        Self::restore_item_origins(&mut candidate.world, &content);
         self.store.replace(&candidate)?;
         self.world = candidate.world;
         self.content = content;
@@ -5264,6 +6183,7 @@ impl Engine {
         candidate.world.manual_pause = true;
         candidate.world.language = language.into();
         Self::restore_portraits(&mut candidate.world);
+        Self::restore_item_origins(&mut candidate.world, &content);
         self.store.replace(&candidate)?;
         self.world = candidate.world;
         self.content = content;

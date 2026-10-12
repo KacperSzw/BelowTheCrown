@@ -293,6 +293,7 @@ fn validate_blueprint(value: &Value) -> Result<()> {
                     | "rope"
                     | "document"
                     | "lockpick"
+                    | "object"
             )),
             "Unknown item kind"
         );
@@ -323,7 +324,7 @@ fn validate_blueprint(value: &Value) -> Result<()> {
         ensure!(
             item["quantity"]
                 .as_u64()
-                .is_some_and(|n| n > 0 && n <= u16::MAX as u64),
+                .is_some_and(|n| n > 0 && n <= u8::MAX as u64),
             "Invalid item quantity"
         );
     }
@@ -743,19 +744,42 @@ impl WorldContent {
     }
     /// Saved custom fields remain literal; only values authored for this exact field localize.
     pub fn actor_text(&self, id: u16, field: &str, source: &str, language: &str) -> String {
-        let path = format!("actors.{id}.{field}");
+        self.saved_entity_text("actors", id, field, source, language)
+    }
+    pub fn item_field_is_authored(&self, id: u16, field: &str, source: &str) -> bool {
+        let path = format!("items.{id}.{field}");
+        self.authored_paths.get(source) == Some(&path)
+            || self
+                .texts
+                .values()
+                .any(|text| at(text, &path).and_then(Value::as_str) == Some(source))
+            || self.scenario["items"].as_array().is_some_and(|items| {
+                items
+                    .iter()
+                    .any(|item| item["id"] == id && item[field].as_str() == Some(source))
+            })
+    }
+    pub fn saved_entity_text(
+        &self,
+        kind: &str,
+        id: u16,
+        field: &str,
+        source: &str,
+        language: &str,
+    ) -> String {
+        let path = format!("{kind}.{id}.{field}");
         if self.authored_paths.get(source) == Some(&path)
             || self
                 .texts
                 .values()
                 .any(|text| at(text, &path).and_then(Value::as_str) == Some(source))
-            || self.scenario["actors"].as_array().is_some_and(|actors| {
+            || self.scenario[kind].as_array().is_some_and(|actors| {
                 actors
                     .iter()
                     .any(|actor| actor["id"] == id && actor[field].as_str() == Some(source))
             })
         {
-            self.entity_text("actors", id, field, language)
+            self.entity_text(kind, id, field, language)
                 .unwrap_or_else(|| source.to_owned())
         } else {
             source.to_owned()

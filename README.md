@@ -45,7 +45,7 @@ Use the address shown by your host. No account, password or game installation
 is needed. The host can join with `ssh -p 2222 127.0.0.1`.
 
 Choose your name. Write to speak in your room; `/` shows actions.
-`/shout` reaches neighbouring rooms. `/auto on` interprets your speech as actions.
+Use CAPS or end with `!!` to shout to neighbouring rooms. `/auto on` interprets your speech as actions.
 
 [Hosting and saves](docs/hosting.md) · [Troubleshooting](docs/sandbox.md) ·
 [Development](docs/development.md) · [NPC minds](docs/npc-minds.md)

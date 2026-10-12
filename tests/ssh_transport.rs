@@ -150,7 +150,8 @@ impl Fixture {
                         if let Some(text) = speech {
                             event_id += 1;
                             let name = &actors[&actor_id].0;
-                            let event = json!({"id":event_id,"kind":"speech","actorId":actor_id,"text":format!("{name}: “{text}”")});
+                            let volume = below_the_crown::model::player_speech_volume(text);
+                            let event = json!({"id":event_id,"kind":"speech","actorId":actor_id,"text":format!("{name}: “{text}”"),"details":{"type":"speech","speakerName":name,"recipientId":null,"recipientName":null,"recipientKnown":true,"volume":volume}});
                             for (_, view) in actors.values() {
                                 let mut next = view.borrow().clone();
                                 next["events"].as_array_mut().unwrap().push(event.clone());
@@ -555,7 +556,7 @@ async fn ordinary_openssh_joins_without_keys_or_guest_installation() {
     stdin.write_all(b"Rook\r").await.unwrap();
     until(|| output.lock().unwrap().contains("Dungeon")).await;
     assert!(!output.lock().unwrap().to_lowercase().contains("your story"));
-    stdin.write_all(b"/shout Help!\r").await.unwrap();
+    stdin.write_all(b"HELP!!\r").await.unwrap();
     until(|| {
         fixture
             .records
@@ -563,9 +564,11 @@ async fn ordinary_openssh_joins_without_keys_or_guest_installation() {
             .unwrap()
             .requests
             .iter()
-            .any(|(_, method, params)| method == "act" && params["intent"]["volume"] == "shout")
+            .any(|(_, method, params)| method == "input" && params["text"] == "HELP!!")
     })
     .await;
+    until(|| output.lock().unwrap().contains("You: “HELP!!”")).await;
+    assert!(!output.lock().unwrap().contains("/shout"));
     stdin.write_all(b"\x03").await.unwrap();
     let status = tokio::time::timeout(Duration::from_secs(6), child.wait())
         .await

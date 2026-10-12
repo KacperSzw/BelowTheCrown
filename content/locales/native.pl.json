@@ -23,8 +23,6 @@
   "Join with SSH": "Dołącz przez SSH",
   "No saves yet.": "Brak zapisów.",
   "People in the room": "Osoby w pomieszczeniu",
-  "Shout to adjoining rooms": "Krzyknij do sąsiednich pomieszczeń",
-  "Use /shout <message>.": "Użyj /shout <wiadomość>.",
   "Portraits": "Portrety",
   "Automatic": "Automatycznie",
   "Automatic actions": "Automatyczne działania",
@@ -54,7 +52,6 @@
   "Show portraits": "Pokaż portrety",
   "Hide portraits": "Ukryj portrety",
   "Plain text · say it to the room": "Zwykły tekst · powiedz osobom w pomieszczeniu",
-  "/shout <message> · adjoining rooms": "/shout <wiadomość> · sąsiednie pomieszczenia",
   "/ · available commands and physical actions; Tab completes": "/ · dostępne polecenia i działania; Tab uzupełnia",
   "/look · surroundings    /inventory · belongings": "/look · otoczenie    /inventory · ekwipunek",
   "/map · known rooms    /journal · memories": "/map · znane pomieszczenia    /journal · wspomnienia",
@@ -121,5 +118,13 @@
   "Cancellations": "Anulowania",
   "Rejected decisions": "Odrzucone decyzje",
   "Failed plan steps": "Nieudane kroki planu",
-  "Last plan failure": "Ostatni błąd planu"
+  "Last plan failure": "Ostatni błąd planu",
+  "CAPS or !! at the end · shout to adjoining rooms": "CAPS lub !! na końcu · krzyk do sąsiednich pomieszczeń",
+  "Shout · Enter sends · adjoining rooms can hear": "Krzyk · Enter wysyła · słychać w sąsiednich pomieszczeniach",
+  "Current failure": "Bieżący błąd",
+  "Last failure": "Ostatni błąd",
+  "decision_validation": "walidacja decyzji",
+  "inference": "generowanie decyzji",
+  "plan_execution": "wykonanie planu",
+  "A distant voice": "Odległy głos"
 }

@@ -52,11 +52,21 @@ pub struct ThinkRequest {
 #[derive(Debug)]
 pub struct ThinkResult {
     pub decision: Value,
+    pub model_output: Option<Value>,
     pub tokens: u64,
     pub latency_ms: f64,
     pub cleanup_ms: f64,
     pub recalled: Vec<u64>,
 }
+
+#[derive(Debug)]
+pub struct DecisionOutputError(String);
+impl std::fmt::Display for DecisionOutputError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+impl std::error::Error for DecisionOutputError {}
 pub trait DecisionDriver: Send + Sync {
     fn think(
         &self,
@@ -365,7 +375,7 @@ impl DriverState {
             rpc.bind(&id,!request.listener).await;
             terminal = false;
             let mut input = request.input.clone();
-            if !request.listener && let Some(own) = input["self"].as_object_mut() {
+            if !request.listener && let Some(own) = input["world"]["self"].as_object_mut() {
                 own.remove("biography");
                 own.remove("personality");
             }
@@ -409,7 +419,10 @@ impl DriverState {
                         terminal = true;
                         ensure!(p["turn"]["status"] == "completed","NPC turn failed: {}",safe_error(p["turn"]["error"]["message"].as_str().unwrap_or("No completed decision")));
                         recalled.sort_unstable(); recalled.dedup();
-                        return Ok(ThinkResult { decision:serde_json::from_str(&final_text).context("NPC final answer did not contain a JSON decision")?, tokens, latency_ms:started.elapsed().as_secs_f64()*1000., cleanup_ms:0., recalled });
+                        let model_output: Value = serde_json::from_str(&final_text).map_err(|error| DecisionOutputError(format!("NPC final answer did not contain a JSON decision: {error}")))?;
+                        let decision = (if request.listener { Ok(model_output.clone()) } else { schema::normalize_decision(model_output.clone()) })
+                            .map_err(|error| DecisionOutputError(safe_error(error)))?;
+                        return Ok(ThinkResult { decision, model_output:Some(model_output), tokens, latency_ms:started.elapsed().as_secs_f64()*1000., cleanup_ms:0., recalled });
                     },
                     _=>{},
                 }

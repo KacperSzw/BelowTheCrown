@@ -931,8 +931,31 @@ impl ManagerUi {
                     .and_then(|a| a["status"]["error"].as_str())
                 {
                     detail.push(Line::styled(
-                        ui::clean(error, false),
+                        format!(
+                            "{}: {}",
+                            self.text("Current failure"),
+                            ui::clean(error, false)
+                        ),
                         Style::default().fg(BLOOD),
+                    ));
+                }
+                if let Some(failure) = self
+                    .actors()
+                    .get(self.selected)
+                    .and_then(|a| a["status"]["lastFailure"].as_object())
+                {
+                    let time = failure.get("time").and_then(Value::as_f64).unwrap_or(0.);
+                    let phase = failure.get("phase").and_then(Value::as_str).unwrap_or("");
+                    let message = failure.get("message").and_then(Value::as_str).unwrap_or("");
+                    detail.push(Line::styled(
+                        format!(
+                            "{} · {} · {}: {}",
+                            self.text("Last failure"),
+                            crate::model::clock_text(time, string(&self.view, "language")),
+                            self.text(phase),
+                            ui::clean(message, false)
+                        ),
+                        Style::default().fg(ASH),
                     ));
                 }
                 if let Some(failure) = actor["lastPlanFailure"].as_object() {

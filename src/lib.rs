@@ -6,6 +6,7 @@ pub mod manager;
 pub mod model;
 pub mod paths;
 pub mod portraits;
+pub mod room_context;
 pub mod runtime;
 pub mod simulation;
 pub mod ssh;

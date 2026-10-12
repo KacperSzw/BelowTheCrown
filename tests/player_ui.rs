@@ -140,7 +140,7 @@ fn wrapped_drafts_have_one_cursor_and_respect_cell_widths() {
     }
 }
 #[test]
-fn plain_text_says_to_room_and_shout_is_explicit() {
+fn emphasized_text_uses_plain_input_and_shout_command_is_retired() {
     let mut view = view();
     view["listener"]["enabled"] = json!(true);
     assert_eq!(
@@ -151,13 +151,11 @@ fn plain_text_says_to_room_and_shout_is_explicit() {
         }
     );
     assert!(suggestions("Kill the king!", &view).is_empty());
-    let Operation::Request { method, params } = parse_input("/SHOUT Pomocy!", &view).unwrap()
-    else {
+    let Operation::Request { method, params } = parse_input("POMOCY!!", &view).unwrap() else {
         panic!()
     };
-    assert_eq!(method, "act");
-    assert_eq!(params["intent"]["volume"], "shout");
-    assert_eq!(params["intent"]["text"], "Pomocy!");
+    assert_eq!(method, "input");
+    assert_eq!(params["text"], "POMOCY!!");
     assert_eq!(params["context"]["roomVisitId"], "visit-1");
     for command in [
         "/do attack Edric",
@@ -167,13 +165,14 @@ fn plain_text_says_to_room_and_shout_is_explicit() {
         "/save",
         "/new",
         "/shout",
+        "/SHOUT Pomocy!",
         &"x".repeat(1201),
     ] {
         assert!(parse_input(command, &view).is_err(), "{command}");
     }
     let menu = suggestions("/", &view);
     assert!(!menu.iter().any(|item| {
-        ["/whisper", "/speed", "/pause", "/save", "/do"]
+        ["/whisper", "/speed", "/pause", "/save", "/do", "/shout"]
             .iter()
             .any(|prefix| item.command.starts_with(prefix))
     }));
@@ -210,6 +209,40 @@ fn physical_choices_and_auto_use_public_view_only() {
     }
     assert_eq!(suggestions("/inspect", &view).len(), 1);
     assert!(parse_input("/auto maybe", &view).is_err());
+}
+
+#[test]
+fn chat_marks_own_and_unrecognized_shouts_without_command_echo() {
+    for utf8 in [false, true] {
+        let mut ui = PlayerUi::new(utf8);
+        let mut view = view();
+        view["events"] = json!([
+            {"id":1,"kind":"activity","actorId":1028,"text":"Beginning an activity in any locale.","details":{"type":"activity_started"}},
+            {"id":2,"kind":"speech","actorId":1028,"text":"Wren shouts: “POMOCY!!”","details":{"type":"speech","speakerName":"Wren","volume":"shout"}},
+            {"id":3,"kind":"speech","actorId":null,"text":"A distant voice shouts: “H…LP”","details":{"type":"speech","speakerName":null,"volume":"shout"}},
+            {"id":4,"kind":"action","actorId":102,"text":"Edric hits Wren: −7 HP."}
+        ]);
+        ui.set_view(view);
+        ui.draft.set("/inspect Edric".into());
+        let submission = ui.input(key(KeyCode::Enter)).unwrap();
+        ui.finish(&submission, Ok(json!({"ok":true})));
+        let text = screen(&mut ui, 100, 35);
+        assert!(
+            text.contains(&format!(
+                "{} You: “POMOCY!!”",
+                if utf8 { "»" } else { ">>" }
+            )),
+            "{text}"
+        );
+        assert!(text.contains("A distant voice: “H…LP”"), "{text}");
+        assert!(text.contains("· Edric hits Wren: −7 HP."));
+        assert!(!text.contains("Beginning an activity"));
+        assert!(!text.contains("/inspect Edric"));
+        ui.input(key(KeyCode::UpArrow));
+        assert_eq!(ui.draft.text, "/inspect Edric");
+        ui.draft.set("ŻÓŁĆ!!".into());
+        assert!(screen(&mut ui, 100, 35).contains("Shout · Enter sends"));
+    }
 }
 #[test]
 fn submissions_capture_context_preserve_failed_drafts_and_keep_new_typing() {
@@ -469,12 +502,12 @@ fn door_menu_view() -> Value {
 #[test]
 fn blocked_exits_are_discoverable_and_completion_submits_only_the_command() {
     let view = door_menu_view();
-    let choices = suggestions("/go", &view);
+    let choices = suggestions("/go ", &view);
     assert_eq!(choices.len(), 3);
     assert_eq!(choices[0].status, "locked");
     let mut ui = PlayerUi::new(false);
     ui.set_view(view);
-    ui.draft.set("/go".into());
+    ui.draft.set("/go ".into());
     ui.input(key(KeyCode::Tab));
     assert_eq!(ui.draft.text, "/go Corridor");
     let submission = ui.input(key(KeyCode::Enter)).unwrap();
@@ -497,7 +530,7 @@ fn door_states_use_distinct_colors_in_suggestions_and_look() {
     for look in [false, true] {
         let mut ui = PlayerUi::new(false);
         ui.set_view(door_menu_view());
-        ui.draft.set(if look { "/look" } else { "/go" }.into());
+        ui.draft.set(if look { "/look" } else { "/go " }.into());
         if look {
             ui.input(key(KeyCode::Enter));
         }
@@ -535,11 +568,74 @@ fn refreshed_door_state_changes_the_hint_without_losing_the_draft() {
     let mut ui = PlayerUi::new(false);
     let mut view = door_menu_view();
     ui.set_view(view.clone());
-    ui.draft.set("/go".into());
+    ui.draft.set("/go ".into());
     view["actions"][0]["available"] = json!(true);
     view["actions"][0]["status"] = json!("open");
     view["actions"][0]["hint"] = json!("open");
     ui.set_view(view.clone());
-    assert_eq!(ui.draft.text, "/go");
-    assert_eq!(suggestions("/go", &view)[0].status, "open");
+    assert_eq!(ui.draft.text, "/go ");
+    assert_eq!(suggestions("/go ", &view)[0].status, "open");
+}
+
+#[test]
+fn selected_item_is_not_silently_retargeted_after_a_view_refresh() {
+    let mut initial = view();
+    initial["actions"] = json!([{"command":"/take Bread","completionCommand":"/take Bread","arguments":[{"value":"Bread","prefix":"","entityId":903}],"intent":{"kind":"take","itemId":903,"quantity":1},"quantityAvailable":3,"forecast":{"durationRealSeconds":0.3}}]);
+    let mut ui = PlayerUi::new(false);
+    ui.set_view(initial.clone());
+    ui.draft.set("/take ".into());
+    ui.input(key(KeyCode::Tab));
+    assert_eq!(ui.draft.text, "/take Bread");
+    initial["actions"][0]["intent"]["itemId"] = json!(1030);
+    initial["actions"][0]["arguments"][0]["entityId"] = json!(1030);
+    ui.set_view(initial);
+    assert!(ui.input(key(KeyCode::Enter)).is_none());
+    assert!(!ui.sending);
+    assert!(screen(&mut ui, 100, 30).contains("selected object is no longer available"));
+}
+#[test]
+fn room_hp_is_visible_with_and_without_portraits_and_look_lists_overflow() {
+    let mut value = view();
+    value["actors"][0]["health"] = json!(73.5);
+    let mut portrait_ui = PlayerUi::new(true);
+    portrait_ui.portraits = PortraitMode::On;
+    portrait_ui.set_view(value.clone());
+    let portrait_rendered = screen(&mut portrait_ui, 160, 48);
+    assert!(portrait_rendered.contains("HP 73.5"), "{portrait_rendered}");
+    value["actors"].as_array_mut().unwrap().extend((200..212).map(|id|json!({"id":id,"name":format!("Guest{id}"),"role":"Visitor","health":id as f64/10.,"activity":"watching"})));
+    for mode in [PortraitMode::On, PortraitMode::Off] {
+        let mut ui = PlayerUi::new(true);
+        ui.portraits = mode;
+        ui.set_view(value.clone());
+        ui.draft.set("/look".into());
+        ui.input(key(KeyCode::Enter));
+        let rendered = screen(&mut ui, 160, 48);
+        assert!(rendered.contains("HP 73.5"), "{rendered}");
+        assert!(rendered.contains("Guest211"), "{rendered}");
+    }
+    value["actors"] =
+        json!([{"id":102,"name":"Edric","role":"Guard","health":0.005,"activity":"watching"}]);
+    let mut ui = PlayerUi::new(false);
+    ui.set_view(value);
+    assert!(screen(&mut ui, 80, 24).contains("HP <0.01"));
+}
+#[test]
+fn enter_completes_required_arguments_and_default_quantity_then_submits() {
+    let mut value = view();
+    value["actions"] = json!([{"command":"/take Bread","completionCommand":"/take Bread","arguments":[{"value":"Bread","prefix":"","entityId":903}],"intent":{"kind":"take","itemId":903,"quantity":1},"quantityAvailable":3}]);
+    let mut ui = PlayerUi::new(false);
+    ui.set_view(value);
+    ui.draft.set("/ta".into());
+    assert!(ui.input(key(KeyCode::Enter)).is_none());
+    assert_eq!(ui.draft.text, "/take ");
+    assert!(ui.input(key(KeyCode::Enter)).is_none());
+    assert_eq!(ui.draft.text, "/take Bread");
+    ui.input(key(KeyCode::Char(' ')));
+    assert!(ui.input(key(KeyCode::Enter)).is_none());
+    assert_eq!(ui.draft.text, "/take Bread 1");
+    let submission = ui.input(key(KeyCode::Enter)).unwrap();
+    let Operation::Request { params, .. } = submission.operation else {
+        panic!()
+    };
+    assert_eq!(params["intent"]["quantity"], 1);
 }

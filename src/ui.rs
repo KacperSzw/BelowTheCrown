@@ -11,6 +11,7 @@ use ratatui::{
 use serde_json::{Value, json};
 use std::collections::VecDeque;
 use termwiz::input::{InputEvent, KeyCode, Modifiers};
+use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -249,6 +250,7 @@ pub struct Suggestion {
     pub command: String,
     pub description: String,
     pub status: String,
+    pub entity_ids: Vec<u16>,
 }
 
 fn door_color(status: &str) -> Color {
@@ -264,7 +266,9 @@ pub fn normalized(text: &str) -> String {
     text.split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-        .to_lowercase()
+        .nfc()
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 fn field<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or("")
@@ -278,6 +282,14 @@ fn list<'a>(value: &'a Value, key: &str) -> &'a [Value] {
 }
 fn number(value: &Value, key: &str) -> f64 {
     value.get(key).and_then(Value::as_f64).unwrap_or(0.0)
+}
+fn health_label(person: &Value) -> String {
+    format!(
+        "HP {}",
+        person["health"]
+            .as_f64()
+            .map_or_else(|| "?".into(), crate::model::number_text)
+    )
 }
 fn id(value: &Value) -> u16 {
     number(value, "id") as u16
@@ -314,7 +326,12 @@ pub fn parse_input(input: &str, view: &Value) -> Result<Operation> {
             "Write a message or choose a command."
         )));
     }
-    if !text.starts_with('/') {
+    if !text.starts_with('/') || text.starts_with("//") {
+        let text = if text.starts_with("//") {
+            &text[1..]
+        } else {
+            text
+        };
         if text.chars().count() > 1200 {
             return Err(anyhow!(translated(
                 view,
@@ -338,41 +355,21 @@ pub fn parse_input(input: &str, view: &Value) -> Result<Operation> {
     if command == "/whisper" {
         return Err(anyhow!(translated(view, "Speech stays in this room.")));
     }
-    for action in list(view, "actions") {
-        if normalized(field(action, "command")) == normalized(text) {
-            let mut params = json!({"intent":action["intent"],"context":context(view)});
-            if matches!(
-                field(&action["intent"], "kind"),
-                "attack" | "defend" | "guard" | "flee" | "move"
-            ) && let Some(combat) = combat_context(view)
-            {
-                params["combat"] = combat;
-            }
-            return Ok(Operation::Request {
-                method: "act".into(),
-                params,
-            });
+    if let Some(intent) = action_input_intent(text, view) {
+        let mut params = json!({"intent":intent,"context":context(view)});
+        if matches!(
+            field(&params["intent"], "kind"),
+            "attack" | "defend" | "flee" | "move"
+        ) && let Some(combat) = combat_context(view)
+        {
+            params["combat"] = combat;
         }
+        return Ok(Operation::Request {
+            method: "act".into(),
+            params,
+        });
     }
     match command.as_str() {
-        "/say" => {
-            if args.is_empty() || args.chars().count() > 1200 {
-                return Err(anyhow!(translated(view, "Write a message.")));
-            }
-            Ok(Operation::Request {
-                method: "input".into(),
-                params: json!({"text":args,"context":context(view)}),
-            })
-        }
-        "/shout" => {
-            if args.is_empty() || args.chars().count() > 1200 {
-                return Err(anyhow!(translated(view, "Write a message.")));
-            }
-            Ok(Operation::Request {
-                method: "act".into(),
-                params: json!({"intent":{"kind":"speak","text":args,"targetId":null,"volume":"shout","plot":null},"context":context(view)}),
-            })
-        }
         "/look" | "/inventory" | "/map" | "/journal" | "/help" if args.is_empty() => {
             Ok(Operation::Local(command[1..].into()))
         }
@@ -396,15 +393,6 @@ pub fn parse_input(input: &str, view: &Value) -> Result<Operation> {
                 params: json!({"enabled":enabled}),
             })
         }
-        "/experimental"
-            if args.eq_ignore_ascii_case("listener on")
-                || args.eq_ignore_ascii_case("listener off") =>
-        {
-            Ok(Operation::Request {
-                method: "listener".into(),
-                params: json!({"enabled":args.to_lowercase().ends_with("on")}),
-            })
-        }
         "/portraits" if ["auto", "on", "off"].contains(&args.to_lowercase().as_str()) => {
             Ok(Operation::Portraits(match args.to_lowercase().as_str() {
                 "on" => PortraitMode::On,
@@ -419,53 +407,224 @@ pub fn parse_input(input: &str, view: &Value) -> Result<Operation> {
     }
 }
 
-pub fn suggestions(input: &str, view: &Value) -> Vec<Suggestion> {
-    if !input.trim_start().starts_with('/') {
-        return Vec::new();
-    }
-    let prefix = normalized(input);
-    let mut choices = vec![
-        ("/say ", "Speak to the room"),
-        ("/shout ", "Shout to adjoining rooms"),
-        ("/look", "Your surroundings"),
-        ("/inventory", "Your belongings"),
-        ("/map", "Known rooms"),
-        ("/journal", "Your memories"),
-        ("/help", "Commands and controls"),
-        (
-            "/cancel",
-            "Cancel queued interpretations and remaining steps",
-        ),
-        ("/auto", "Toggle actions inferred from your speech"),
-        ("/auto on", "Turn speech actions on"),
-        ("/auto off", "Turn speech actions off"),
-        ("/portraits auto", "Detect portrait support"),
-        ("/portraits on", "Show portraits"),
-        ("/portraits off", "Hide portraits"),
-        ("/quit", "Leave the castle"),
-    ]
-    .into_iter()
-    .map(|(command, description)| Suggestion {
-        command: command.into(),
-        description: translated(view, description),
-        status: String::new(),
-    })
-    .collect::<Vec<_>>();
+fn action_input_intent(text: &str, view: &Value) -> Option<Value> {
+    let input = normalized(text);
     for action in list(view, "actions") {
-        choices.push(Suggestion {
-            command: field(action, "command").into(),
-            status: field(action, "status").into(),
-            description: field(action, "hint").to_owned().chars().next().map_or_else(
-                || field(action, "label").into(),
-                |_| field(action, "hint").into(),
+        if ["command", "completionCommand"]
+            .iter()
+            .any(|key| !field(action, key).is_empty() && normalized(field(action, key)) == input)
+        {
+            return Some(action["intent"].clone());
+        }
+    }
+    for action in list(view, "actions") {
+        for key in ["command", "completionCommand"] {
+            let base = normalized(field(action, key));
+            if base.is_empty() {
+                continue;
+            }
+            if action["intent"].get("quantity").is_some()
+                && let Some(tail) = input.strip_prefix(&format!("{base} "))
+            {
+                let Some(count) = (if tail == "all" {
+                    Some(0)
+                } else {
+                    tail.parse::<u8>().ok().filter(|count| *count > 0)
+                }) else {
+                    continue;
+                };
+                let mut intent = action["intent"].clone();
+                intent["quantity"] = json!(count);
+                return Some(intent);
+            }
+            if field(&action["intent"], "kind") == "pay"
+                && let Some((prefix, _)) = base.rsplit_once(' ')
+                && let Some(amount) = input
+                    .strip_prefix(&format!("{prefix} "))
+                    .and_then(|text| text.parse::<u16>().ok())
+                    .filter(|amount| (1..=1000).contains(amount))
+            {
+                let mut intent = action["intent"].clone();
+                intent["amount"] = json!(amount);
+                return Some(intent);
+            }
+        }
+    }
+    None
+}
+fn completion_prefix(input: &str) -> String {
+    let mut prefix = normalized(input);
+    if input.ends_with(char::is_whitespace) {
+        prefix.push(' ');
+    }
+    prefix
+}
+
+fn speech_line(event: &Value, self_id: u16, view: &Value, utf8: bool) -> String {
+    let text = field(event, "text");
+    let Some((_, words)) = text.split_once(": ") else {
+        return text.to_owned();
+    };
+    let own = number(event, "actorId") as u16 == self_id;
+    if event["details"]["type"] == "speech" && event["details"]["volume"] == "shout" {
+        let speaker = if own {
+            translated(view, "You")
+        } else {
+            event["details"]["speakerName"]
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| translated(view, "A distant voice"))
+        };
+        format!("{} {speaker}: {words}", if utf8 { "»" } else { ">>" })
+    } else if own {
+        format!("{}: {words}", translated(view, "You"))
+    } else {
+        text.to_owned()
+    }
+}
+pub fn suggestions(input: &str, view: &Value) -> Vec<Suggestion> {
+    if !input.trim_start().starts_with('/') || input.trim_start().starts_with("//") {
+        return vec![];
+    }
+    let prefix = completion_prefix(input);
+    let first = !input.trim_start().contains(char::is_whitespace);
+    let mut choices = Vec::new();
+    let mut push = |command: String, description: String, status: String, entity_ids: Vec<u16>| {
+        if completion_prefix(&command).starts_with(&prefix) && command != input {
+            choices.push(Suggestion {
+                command,
+                description,
+                status,
+                entity_ids,
+            });
+        }
+    };
+    if first {
+        for (command, description) in [
+            ("/look", "Your surroundings"),
+            ("/inventory", "Your belongings"),
+            ("/map", "Known rooms"),
+            ("/journal", "Your memories"),
+            ("/help", "Commands and controls"),
+            (
+                "/cancel",
+                "Cancel queued interpretations and remaining steps",
             ),
+            ("/auto", "Toggle actions inferred from your speech"),
+            ("/portraits ", "Choose portrait preference"),
+            ("/quit", "Leave the castle"),
+        ] {
+            push(
+                command.into(),
+                translated(view, description),
+                String::new(),
+                vec![],
+            );
+        }
+    } else {
+        for (verb, options) in [
+            ("/auto", &["on", "off"][..]),
+            ("/portraits", &["auto", "on", "off"][..]),
+        ] {
+            for option in options {
+                push(
+                    format!("{verb} {option}"),
+                    translated(view, option),
+                    String::new(),
+                    vec![],
+                );
+            }
+        }
+    }
+    for action in list(view, "actions") {
+        let command = field(action, "command");
+        let (verb, remainder) = command.split_once(' ').unwrap_or((command, ""));
+        let arguments = action["arguments"].as_array().cloned().unwrap_or_else(|| {
+            if remainder.is_empty() {
+                vec![]
+            } else {
+                vec![json!({"value":remainder,"prefix":""})]
+            }
         });
+        let description = ["subLabel", "hint", "label"]
+            .iter()
+            .map(|key| field(action, key))
+            .find(|value| !value.is_empty())
+            .unwrap_or_default()
+            .to_owned();
+        let status = field(action, "status").to_owned();
+        if first {
+            push(
+                format!("{verb}{}", if arguments.is_empty() { "" } else { " " }),
+                if arguments.is_empty() {
+                    description
+                } else {
+                    field(action, "group").to_owned()
+                },
+                String::new(),
+                vec![],
+            );
+            continue;
+        }
+        let mut path = verb.to_owned();
+        let mut ids = Vec::new();
+        for (index, argument) in arguments.iter().enumerate() {
+            if let Some(id) = argument["entityId"].as_u64() {
+                ids.push(id as u16);
+            }
+            let fixed = field(argument, "prefix");
+            if !fixed.is_empty() {
+                path.push_str(&format!(" {fixed}"));
+            }
+            path.push_str(&format!(" {}", field(argument, "value")));
+            let more = index + 1 < arguments.len();
+            let hint = if more {
+                translated(
+                    view,
+                    if field(&arguments[index + 1], "prefix") == "with" {
+                        "Choose a tool"
+                    } else if field(&arguments[index + 1], "field") == "amount" {
+                        "Choose an amount"
+                    } else {
+                        "Choose the recipient or destination"
+                    },
+                )
+            } else {
+                description.clone()
+            };
+            push(
+                format!("{path}{}", if more { " " } else { "" }),
+                hint,
+                status.clone(),
+                ids.clone(),
+            );
+        }
+        if action["intent"].get("quantity").is_some() {
+            for value in ["1", "all"] {
+                let quantity = if value == "all" {
+                    number(action, "quantityAvailable") as u16
+                } else {
+                    1
+                };
+                push(
+                    format!("{path} {value}"),
+                    format!(
+                        "{} · {}s",
+                        if field(view, "language") == "pl" {
+                            format!("{quantity} szt.")
+                        } else {
+                            format!("{quantity} unit(s)")
+                        },
+                        number(&action["forecast"], "durationRealSeconds")
+                    ),
+                    status.clone(),
+                    ids.clone(),
+                );
+            }
+        }
     }
     let mut seen = std::collections::HashSet::new();
-    choices.retain(|choice| {
-        let normalized = normalized(&choice.command);
-        normalized.starts_with(&prefix) && normalized != prefix && seen.insert(normalized)
-    });
+    choices.retain(|choice| seen.insert(choice.command.clone()));
     choices
 }
 
@@ -508,6 +667,7 @@ pub struct PlayerUi {
     history_index: Option<usize>,
     history_draft: Draft,
     selection: usize,
+    selection_binding: Option<(String, Vec<u16>)>,
     dismissed: bool,
     combat_focus: bool,
     combat_selection: usize,
@@ -535,11 +695,57 @@ impl PlayerUi {
             history_index: None,
             history_draft: Draft::default(),
             selection: 0,
+            selection_binding: None,
             dismissed: false,
             combat_focus: false,
             combat_selection: 0,
             combat_round: String::new(),
         }
+    }
+    fn current_menu(&self) -> Vec<Suggestion> {
+        if self.dismissed {
+            return vec![];
+        }
+        let mut menu = suggestions(&self.draft.text, &self.view);
+        if let Some((prefix, ids)) = &self.selection_binding
+            && normalized(&self.draft.text).starts_with(&normalized(prefix))
+        {
+            menu.retain(|candidate| ids.iter().all(|id| candidate.entity_ids.contains(id)));
+        }
+        menu
+    }
+    fn complete(&mut self, candidate: &Suggestion) {
+        self.draft.set(candidate.command.clone());
+        self.change();
+        self.selection_binding = (!candidate.entity_ids.is_empty()).then(|| {
+            (
+                candidate.command.trim_end().to_owned(),
+                candidate.entity_ids.clone(),
+            )
+        });
+    }
+    fn parse_draft(&self) -> Result<Operation> {
+        let operation = parse_input(&self.draft.text, &self.view)?;
+        if let Some((prefix, ids)) = &self.selection_binding
+            && normalized(&self.draft.text).starts_with(&normalized(prefix))
+            && let Operation::Request { method, params } = &operation
+            && method == "act"
+        {
+            let actual = params["intent"]
+                .as_object()
+                .into_iter()
+                .flat_map(|fields| fields.iter())
+                .filter(|(key, _)| key.ends_with("Id"))
+                .filter_map(|(_, value)| value.as_u64())
+                .collect::<Vec<_>>();
+            if !ids.iter().all(|id| actual.contains(&u64::from(*id))) {
+                return Err(anyhow!(translated(
+                    &self.view,
+                    "The selected object is no longer available. Choose it again."
+                )));
+            }
+        }
+        Ok(operation)
     }
     pub fn set_view(&mut self, view: Value) {
         let branch = field(&view, "branch").to_owned();
@@ -572,8 +778,10 @@ impl PlayerUi {
             }
             self.event_cursor = event_id;
             let text = field(event, "text");
-            if text.starts_with("You begin to ")
+            if event["details"]["type"] == "activity_started"
+                || text.starts_with("You begin to ")
                 || text.starts_with("Zaczynasz ")
+                || text.starts_with("Zaczynasz: ")
                 || text.starts_with("Damp stone. A guttering torch.")
                 || text.starts_with("Wilgotny kamień. Dogasająca pochodnia.")
             {
@@ -587,13 +795,10 @@ impl PlayerUi {
                 "notice" => SAGE,
                 _ => ASH,
             };
-            let text = if field(event, "kind") == "speech" && actor == self_id {
-                text.split_once(": ").map_or_else(
-                    || text.to_owned(),
-                    |(_, speech)| format!("{}: {speech}", translated(&view, "You")),
-                )
+            let text = if field(event, "kind") == "speech" {
+                speech_line(event, self_id, &view, self.utf8)
             } else {
-                text.into()
+                format!("· {text}")
             };
             self.write(&text, color);
         }
@@ -753,7 +958,10 @@ impl PlayerUi {
             _ => {}
         }
         let combat_choices = list(&self.view["combat"], "choices").to_vec();
-        if !combat_choices.is_empty() && key.key == KeyCode::Tab {
+        if !combat_choices.is_empty()
+            && key.key == KeyCode::Tab
+            && !self.draft.text.trim_start().starts_with('/')
+        {
             self.combat_focus = !self.combat_focus;
             self.dismissed = true;
             return None;
@@ -789,11 +997,7 @@ impl PlayerUi {
                 _ => return None,
             }
         }
-        let menu = if self.dismissed {
-            Vec::new()
-        } else {
-            suggestions(&self.draft.text, &self.view)
-        };
+        let menu = self.current_menu();
         match key.key {
             KeyCode::Escape => {
                 self.dismissed = true;
@@ -824,15 +1028,19 @@ impl PlayerUi {
                 };
             }
             KeyCode::Tab if !menu.is_empty() => {
-                self.draft
-                    .set(menu[self.selection.min(menu.len() - 1)].command.clone());
-                self.change();
+                self.complete(&menu[self.selection.min(menu.len() - 1)]);
             }
             KeyCode::Enter if !self.sending => {
                 if self.draft.text.trim().is_empty() {
                     return None;
                 }
-                match parse_input(&self.draft.text, &self.view) {
+                if self.draft.text.ends_with(char::is_whitespace)
+                    && let Some(candidate) = menu.get(self.selection)
+                {
+                    self.complete(candidate);
+                    return None;
+                }
+                match self.parse_draft() {
                     Ok(operation) => {
                         let text = self.draft.text.clone();
                         match &operation {
@@ -853,8 +1061,7 @@ impl PlayerUi {
                     }
                     Err(error) => {
                         if let Some(candidate) = menu.get(self.selection) {
-                            self.draft.set(candidate.command.clone());
-                            self.change();
+                            self.complete(candidate);
                         } else {
                             self.write(&error.to_string(), BLOOD);
                         }
@@ -903,6 +1110,7 @@ impl PlayerUi {
         }
         if self.draft.text == text {
             self.draft = Draft::default();
+            self.selection_binding = None;
         }
         self.history_index = None;
         self.selection = 0;
@@ -912,12 +1120,6 @@ impl PlayerUi {
         self.sending = false;
         match result {
             Ok(value) if value.get("ok").and_then(Value::as_bool) != Some(false) => {
-                if let Operation::Request { method, .. } = &submission.operation
-                    && method == "act"
-                    && !submission.text.is_empty()
-                {
-                    self.write(&format!("› {}", submission.text.trim()), AMBER);
-                }
                 self.acknowledge(&submission.text);
                 self.combat_focus = false;
             }
@@ -926,21 +1128,43 @@ impl PlayerUi {
         }
     }
     fn show(&mut self, name: &str) {
-        self.write(&format!("› /{name}"), IVORY);
         let view = self.view.clone();
         match name {
             "look" => {
                 self.write(field(&view["room"], "name"), AMBER);
                 self.write(field(&view["room"], "description"), PALE);
-                for actor in list(&view, "actors") {
+                for actor in std::iter::once(&view["self"]).chain(list(&view, "actors")) {
                     self.write(
                         &format!(
-                            "{} · {} · {}",
+                            "{} · {} · {} · {}",
                             field(actor, "name"),
                             field(actor, "role"),
+                            health_label(actor),
                             field(actor, "activity")
                         ),
                         actor_color(id(actor), id(&view["self"])),
+                    );
+                }
+                for item in list(&view, "items") {
+                    let owner = item["ownerId"]
+                        .as_u64()
+                        .and_then(|id| {
+                            list(&view, "actors")
+                                .iter()
+                                .find(|actor| number(actor, "id") as u64 == id)
+                        })
+                        .map(|actor| field(actor, "name"));
+                    let custody = owner.map_or_else(
+                        || translated(&view, "Loose item"),
+                        |name| format!("{} {name}", translated(&view, "Held by")),
+                    );
+                    self.write(
+                        &format!(
+                            "{} ×{} · {custody}",
+                            field(item, "name"),
+                            number(item, "quantity")
+                        ),
+                        AMBER,
                     );
                 }
                 for door in list(&view, "doors") {
@@ -1026,7 +1250,8 @@ impl PlayerUi {
             "help" => {
                 for help in [
                     "Plain text · say it to the room",
-                    "/shout <message> · adjoining rooms",
+                    "//text · say text beginning with a slash",
+                    "CAPS or !! at the end · shout to adjoining rooms",
                     "/ · available commands and physical actions; Tab completes",
                     "/look · surroundings    /inventory · belongings",
                     "/map · known rooms    /journal · memories",
@@ -1036,13 +1261,13 @@ impl PlayerUi {
                     "Enter sends · Shift+Enter / Ctrl+J newline · Ctrl+U clears",
                     "↑↓ history / suggestions · Esc closes suggestions",
                     "Page Up/Down scroll chat · Ctrl+End returns to live chat",
-                    "Currently available physical actions:",
+                    "Choose a verb, then its object, recipient, and quantity.",
                 ] {
                     self.write(&translated(&view, help), PALE);
                 }
-                for action in list(&view, "actions") {
+                for action in suggestions("/", &view) {
                     self.write(
-                        &format!("{} · {}", field(action, "command"), field(action, "label")),
+                        &format!("{} · {}", action.command, action.description),
                         AMBER,
                     );
                 }
@@ -1065,11 +1290,7 @@ impl PlayerUi {
             );
             return;
         }
-        let menu = if self.dismissed {
-            Vec::new()
-        } else {
-            suggestions(&self.draft.text, &self.view)
-        };
+        let menu = self.current_menu();
         let compact = height < 16;
         let stat_rows = if compact || width >= 65 {
             1
@@ -1090,7 +1311,7 @@ impl PlayerUi {
         } else {
             0
         };
-        let menu_rows = if combat_rows > 0 {
+        let menu_rows = if self.combat_focus {
             0
         } else {
             menu.len().min(if height < 24 { 2 } else { 5 })
@@ -1225,9 +1446,10 @@ impl PlayerUi {
                     Line::styled(
                         clip(
                             &format!(
-                                "{}{}",
+                                "{}{} · {}",
                                 if selected { "› " } else { "  " },
-                                field(choice, "label")
+                                field(choice, "label"),
+                                field(choice, "subLabel")
                             ),
                             width,
                         ),
@@ -1311,6 +1533,12 @@ impl PlayerUi {
                     self.unread,
                     translated(&self.view, "new")
                 )
+            } else if (!self.draft.text.trim_start().starts_with('/')
+                || self.draft.text.trim_start().starts_with("//"))
+                && crate::model::player_speech_volume(&self.draft.text)
+                    == crate::model::Volume::Shout
+            {
+                translated(&self.view, "Shout · Enter sends · adjoining rooms can hear")
             } else {
                 translated(&self.view, "/ commands · Enter speak · Ctrl+J newline")
             };
@@ -1342,7 +1570,14 @@ impl PlayerUi {
                                     .chars()
                                     .take(if width < 31 { 1 } else { 2 })
                                     .collect::<String>(),
-                                number(&self.view["self"], key).clamp(0.0, 100.0).round()
+                                if *key == "health" {
+                                    crate::model::number_text(number(&self.view["self"], key))
+                                } else {
+                                    number(&self.view["self"], key)
+                                        .clamp(0.0, 100.0)
+                                        .round()
+                                        .to_string()
+                                }
                             ),
                             Style::default().fg(*color),
                         )
@@ -1376,7 +1611,14 @@ impl PlayerUi {
                         Style::default().fg(Color::Rgb(81, 77, 70)),
                     ));
                     spans.push(Span::styled(
-                        format!(" {:>3}", value.round()),
+                        format!(
+                            " {:>3}",
+                            if *key == "health" {
+                                crate::model::number_text(value)
+                            } else {
+                                value.round().to_string()
+                            }
+                        ),
                         Style::default().fg(IVORY),
                     ));
                 }
@@ -1460,13 +1702,14 @@ impl PlayerUi {
                 } else {
                     field(person, "condition")
                 };
+                let hp = health_label(person);
                 for line in 0..ph {
                     let mut spans = vec![Span::styled(
                         face.get(line).cloned().unwrap_or_else(|| " ".repeat(pw)),
                         Style::default().fg(PALE),
                     )];
                     if let Some(text) =
-                        [field(person, "name"), field(person, "role"), state].get(line)
+                        [field(person, "name"), field(person, "role"), &hp, state].get(line)
                     {
                         spans.push(Span::styled(
                             format!("  {}", clip(text, card_width.saturating_sub(pw + 2))),
@@ -1491,7 +1734,10 @@ impl PlayerUi {
             let mut used = 0;
             let mut hidden = 0;
             for person in &people {
-                let name = clip(&format!(". {} ", field(person, "name")), width);
+                let name = clip(
+                    &format!(". {} {} ", health_label(person), field(person, "name")),
+                    width,
+                );
                 let cells = UnicodeWidthStr::width(name.as_str());
                 if used + cells > width && used > 0 {
                     if rows.len() >= available {
@@ -1521,6 +1767,28 @@ impl PlayerUi {
             }
         }
         if usize::from(y - area.y) < budget {
+            let items = list(&self.view, "items")
+                .iter()
+                .filter(|item| item["ownerId"].is_null())
+                .map(|item| format!("{} ×{}", field(item, "name"), number(item, "quantity")))
+                .collect::<Vec<_>>();
+            if !items.is_empty() {
+                draw(
+                    frame,
+                    Rect::new(area.x, y, area.width, 1),
+                    Line::styled(
+                        clip(
+                            &format!(
+                                "{}: {} · /look",
+                                translated(&self.view, "Items"),
+                                items.join(" · ")
+                            ),
+                            width,
+                        ),
+                        Style::default().fg(AMBER),
+                    ),
+                );
+            }
             y += 1;
         }
         usize::from(y - area.y)

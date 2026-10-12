@@ -103,12 +103,20 @@ struct Timing {
     cleanup_ms: f64,
     total_ms: f64,
 }
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Failure {
+    message: String,
+    time: f64,
+    phase: &'static str,
+}
 #[derive(Default)]
 struct Status {
     calls: u64,
     tokens: u64,
     latency: Option<f64>,
     error: Option<String>,
+    last_failure: Option<Failure>,
     reason: String,
     state: String,
     summary: String,
@@ -384,6 +392,11 @@ impl Simulation {
                 if status.seen_failure.as_ref() != Some(&value) {
                     status.execution_failures += 1;
                     status.seen_failure = Some(value);
+                    status.last_failure = Some(Failure {
+                        message: safe_error(&failure.reason),
+                        time: failure.time,
+                        phase: "plan_execution",
+                    });
                 }
             }
         }
@@ -693,6 +706,11 @@ impl Simulation {
             return Ok(());
         }
         let job = self.jobs.remove(&key).unwrap();
+        let failure_phase = match &completion.result {
+            Err(error) if error.is::<crate::codex::DecisionOutputError>() => "decision_validation",
+            Err(_) => "inference",
+            Ok(_) => "decision_validation",
+        };
         let result = match completion.result {
             Ok(result) => {
                 let status = self.statuses.entry(key).or_default();
@@ -753,6 +771,11 @@ impl Simulation {
                 };
                 let status = self.statuses.entry(key).or_default();
                 status.error = Some(error.clone());
+                status.last_failure = Some(Failure {
+                    message: error.clone(),
+                    time: self.engine.world.time,
+                    phase: failure_phase,
+                });
                 status.state = "failed".into();
                 status.rejections += 1;
                 if let Some(mut q) = job.queued.filter(|q| q.attempt < 1)
@@ -914,7 +937,7 @@ impl Simulation {
                         );
                     }
                     (
-                        json!({"kind":"speak","text":text.trim(),"targetId":null,"volume":"normal","plot":null}),
+                        json!({"kind":"speak","text":text.trim(),"targetId":null,"volume":crate::model::player_speech_volume(text),"plot":null}),
                         None,
                     )
                 } else {
@@ -942,7 +965,7 @@ impl Simulation {
                         intent["targetId"].is_null()
                             && intent["plot"].is_null()
                             && matches!(intent["volume"].as_str(), Some("normal" | "shout")),
-                        "Speech stays in the room; use /shout to call adjoining rooms"
+                        "Speech must be normal or shouted, without a private recipient or plot"
                     );
                 }
                 if speech && self.enabled(actor) {
@@ -1225,7 +1248,7 @@ impl Simulation {
                 } else {
                     "ai"
                 });
-                actor["status"] = json!({"state":state,"reason":status.map(|s|s.reason.as_str()).unwrap_or(""),"calls":status.map_or(0,|s|s.calls),"tokens":status.map_or(0,|s|s.tokens),"elapsedMs":job.map_or(0.,|j|(self.wall-j.started)*1000.),"lastLatencyMs":status.and_then(|s|s.latency),"timing":status.and_then(|s|s.timing),"cancellations":status.map_or(0,|s|s.cancellations),"rejections":status.map_or(0,|s|s.rejections),"executionFailures":status.map_or(0,|s|s.execution_failures),"error":status.and_then(|s|s.error.as_ref())});
+                actor["status"] = json!({"state":state,"reason":status.map(|s|s.reason.as_str()).unwrap_or(""),"calls":status.map_or(0,|s|s.calls),"tokens":status.map_or(0,|s|s.tokens),"elapsedMs":job.map_or(0.,|j|(self.wall-j.started)*1000.),"lastLatencyMs":status.and_then(|s|s.latency),"timing":status.and_then(|s|s.timing),"cancellations":status.map_or(0,|s|s.cancellations),"rejections":status.map_or(0,|s|s.rejections),"executionFailures":status.map_or(0,|s|s.execution_failures),"error":status.and_then(|s|s.error.as_ref()),"lastFailure":status.and_then(|s|s.last_failure.as_ref())});
             }
         }
         view["metrics"] = self.metrics(None);
@@ -1447,6 +1470,7 @@ mod tests {
     }
     fn decision(plan: Value) -> ThinkResult {
         ThinkResult {
+            model_output: None,
             decision: json!({"summary":"A controlled intention.","goals":[],"plan":plan,"memories":[],"relationships":[],"acceptPlots":[]}),
             tokens: 10,
             latency_ms: 100.,
@@ -1540,7 +1564,12 @@ mod tests {
         finish(&mut sim).await;
         sim.pump().unwrap();
         let (hello, obsolete) = started(&mut requests).await;
-        assert!(hello.input["reason"].as_str().unwrap().contains("Hello."));
+        assert!(
+            hello.input["execution"]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("Hello.")
+        );
         obsolete.send(Ok(decision(json!([
             {"kind":"speak","text":"An obsolete conversational answer.","targetId":null,"volume":"normal","plot":null}
         ])))).unwrap();
@@ -1554,14 +1583,19 @@ mod tests {
         finish(&mut sim).await;
         sim.pump().unwrap();
         let (latest, reply) = started(&mut requests).await;
-        assert!(latest.input["reason"].as_str().unwrap().contains("Halina"));
+        assert!(
+            latest.input["execution"]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("Halina")
+        );
         assert_eq!(
             sim.wall, 0.,
             "Fresh conversation starts as soon as obsolete work releases its slot"
         );
         reply.send(Ok(decision(json!([
             {"kind":"speak","text":"Halina? The register says otherwise.","targetId":null,"volume":"normal","plot":null},
-            {"kind":"guard","seconds":1200}
+            {"kind":"wait","seconds":1200}
         ])))).unwrap();
         finish(&mut sim).await;
         let speech: Vec<_> = sim
@@ -1611,7 +1645,7 @@ mod tests {
         let player = sim.join(None, "Fixture Guest".into()).unwrap();
         sim.queued.clear();
         sim.engine
-            .dispatch(102, json!({"kind":"guard","seconds":60}), vec![], None)
+            .dispatch(102, json!({"kind":"wait","seconds":60}), vec![], None)
             .unwrap();
         let physical = json!(sim.engine.actor(102).unwrap().activity);
         sim.player_request(
@@ -1630,9 +1664,14 @@ mod tests {
         assert!(queued.wake.reason.contains("Halina"));
         sim.pump().unwrap();
         let (request, _) = started(&mut requests).await;
-        assert!(request.input["reason"].as_str().unwrap().contains("Halina"));
         assert!(
-            request.input["recentDialogue"]
+            request.input["execution"]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("Halina")
+        );
+        assert!(
+            request.input["world"]["roomContext"]["entries"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -1651,7 +1690,7 @@ mod tests {
             sim.pump().unwrap();
             let (_, reply) = started(&mut requests).await;
             reply
-                .send(Ok(decision(json!([{"kind":"guard","seconds":seconds}]))))
+                .send(Ok(decision(json!([{"kind":"wait","seconds":seconds}]))))
                 .unwrap();
             finish(&mut sim).await;
             let real = sim.wall;
@@ -1721,12 +1760,12 @@ mod tests {
         sim.pump().unwrap();
         let (request, _) = started(&mut requests).await;
         assert!(
-            request.input["reason"]
+            request.input["execution"]["reason"]
                 .as_str()
                 .unwrap()
                 .contains("Did you hear me?")
         );
-        let dialogue: Vec<_> = request.input["recentDialogue"]
+        let dialogue: Vec<_> = request.input["world"]["roomContext"]["entries"]
             .as_array()
             .unwrap()
             .iter()
@@ -1759,7 +1798,12 @@ mod tests {
         finish(&mut sim).await;
         sim.pump().unwrap();
         let (retry, second) = started(&mut requests).await;
-        assert!(retry.input["reason"].as_str().unwrap().contains("rejected"));
+        assert!(
+            retry.input["execution"]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("rejected")
+        );
         assert_eq!(sim.wall, 0.);
         second.send(Ok(decision(bad))).unwrap();
         finish(&mut sim).await;
@@ -1786,7 +1830,12 @@ mod tests {
         sim.pump().unwrap();
         let (retry, second) = started(&mut requests).await;
         assert_eq!(retry.actor_id, 102);
-        assert!(retry.input["reason"].as_str().unwrap().contains("rejected"));
+        assert!(
+            retry.input["execution"]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("rejected")
+        );
         assert_eq!(sim.wall, 0.);
         second.send(Ok(decision(bad))).unwrap();
         finish(&mut sim).await;
@@ -1796,6 +1845,84 @@ mod tests {
         assert!(requests.try_recv().is_err());
         assert_eq!(sim.statuses[&(102, false)].state, "failed");
         assert_eq!(sim.statuses[&(102, false)].calls, 2);
+        sim.cancel_all();
+    }
+
+    #[tokio::test]
+    async fn manager_retains_validation_failure_after_retry_and_success() {
+        let (mut sim, mut requests, _) = fixture();
+        sim.scheduling.maximum_calls = 1;
+        let player = sim.join(None, "Fixture Guest".into()).unwrap();
+        only(&mut sim, &[102]);
+        sim.pump().unwrap();
+        let (_, first) = started(&mut requests).await;
+        first
+            .send(Ok(decision(
+                json!([{"kind":"take","itemId":1001,"quantity":1}]),
+            )))
+            .unwrap();
+        finish(&mut sim).await;
+        let failure = sim.manager_view().unwrap()["actors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["id"] == 102)
+            .unwrap()["status"]["lastFailure"]
+            .clone();
+        assert_eq!(failure["phase"], "decision_validation");
+        assert!(!failure["message"].as_str().unwrap().is_empty());
+        assert_eq!(failure["time"], sim.engine.world.time);
+        sim.pump().unwrap();
+        let (_, second) = started(&mut requests).await;
+        assert!(sim.statuses[&(102, false)].error.is_none());
+        assert_eq!(json!(sim.statuses[&(102, false)].last_failure), failure);
+        second.send(Ok(decision(json!([])))).unwrap();
+        finish(&mut sim).await;
+        assert_eq!(sim.statuses[&(102, false)].state, "idle");
+        assert!(sim.statuses[&(102, false)].error.is_none());
+        assert_eq!(json!(sim.statuses[&(102, false)].last_failure), failure);
+        let view = sim.player_view(player.actor_id).unwrap();
+        assert!(
+            view["actors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|a| a.get("status").is_none())
+        );
+        assert!(!view.to_string().contains("\"lastFailure\""));
+        sim.cancel_all();
+    }
+
+    #[tokio::test]
+    async fn input_classifies_player_shouts_and_preserves_actual_words() {
+        use crate::model::Volume;
+        let (mut sim, _, _) = fixture();
+        let player = sim.join(None, "Fixture Guest".into()).unwrap();
+        for (text, expected) in [
+            ("MIKOŁAJ TUTAJ DZIEDZINIEC", Volume::Shout),
+            ("Pomocy!!", Volume::Shout),
+            ("Pomocy!!  ", Volume::Shout),
+            ("Pomocy!", Volume::Normal),
+            ("Mikołaj, TUTAJ", Volume::Normal),
+            ("1234!!!", Volume::Shout),
+            ("1234", Volume::Normal),
+            ("I", Volume::Normal),
+        ] {
+            let result = sim
+                .player_request(player.actor_id, "input", json!({"text":text}))
+                .unwrap();
+            assert_eq!(result["ok"], true);
+            let event = sim
+                .engine
+                .store
+                .observed_event(player.actor_id, result["eventId"].as_u64().unwrap())
+                .unwrap()
+                .unwrap();
+            assert!(event.text.contains(text.trim()));
+            assert!(
+                matches!(event.details, Some(crate::model::EventDetails::Speech { volume, .. }) if volume == expected)
+            );
+        }
         sim.cancel_all();
     }
 
@@ -1832,6 +1959,7 @@ mod tests {
                     assert_eq!(request.actor_id, player.actor_id);
                     assert_eq!(request.input["text"], "Who runs this room?");
                     reply.send(Ok(ThinkResult {
+            model_output: None,
                         decision: json!({"summary":"A question with no physical action.","plan":[]}),
                         tokens: 10,
                         latency_ms: 100.,
@@ -1841,14 +1969,14 @@ mod tests {
                 } else {
                     requested_npcs.push(request.actor_id);
                     assert!(
-                        request.input["reason"]
+                        request.input["execution"]["reason"]
                             .as_str()
                             .unwrap()
                             .contains("Who runs this room?")
                     );
                     reply.send(Ok(decision(json!([
                         {"kind":"speak","text":format!("Reply from {}.", request.actor_id),"targetId":null,"volume":"normal","plot":null},
-                        {"kind":"guard","seconds":600}
+                        {"kind":"wait","seconds":600}
                     ])))).unwrap();
                 }
             }
@@ -1916,7 +2044,7 @@ mod tests {
             let (request, reply) = started(&mut requests).await;
             actors.push(request.actor_id);
             assert!(
-                request.input["reason"]
+                request.input["execution"]["reason"]
                     .as_str()
                     .unwrap()
                     .contains("Has anyone seen the captain?")
@@ -1954,7 +2082,7 @@ mod tests {
             assert!(requests.try_recv().is_err());
             let (finished, reply) = active.remove(0);
             reply
-                .send(Ok(decision(json!([{"kind":"guard","seconds":600}]))))
+                .send(Ok(decision(json!([{"kind":"wait","seconds":600}]))))
                 .unwrap();
             finish(&mut sim).await;
             assert_eq!(sim.inflight.len(), capacity - 1);
@@ -2103,7 +2231,7 @@ mod tests {
         only(&mut sim, &[102]);
         sim.tick(2.).unwrap();
         let (request, reply) = started(&mut requests).await;
-        let evidence = request.input["memories"]
+        let evidence = request.input["world"]["memories"]
             .as_array()
             .unwrap()
             .first()
@@ -2174,6 +2302,7 @@ mod tests {
         );
         reply
             .send(Ok(ThinkResult {
+                model_output: None,
                 decision: json!({"summary":"No physical request.","plan":[]}),
                 tokens: 10,
                 latency_ms: 100.,
@@ -2228,7 +2357,7 @@ mod tests {
     async fn listener_can_replace_long_duties_but_waits_for_short_physical_actions() {
         for first in [
             json!({"kind":"rest","seconds":1000}),
-            json!({"kind":"guard","seconds":700}),
+            json!({"kind":"wait","seconds":700}),
             json!({"kind":"take","itemId":1023}),
         ] {
             for queued in [false, true] {
@@ -2288,6 +2417,7 @@ mod tests {
                 assert_eq!(request.actor_id, id);
                 assert!(request.listener);
                 reply.send(Ok(ThinkResult {
+            model_output: None,
                     decision: json!({"summary":"Wait by the wall.","plan":[{"kind":"wait","seconds":90}]}),
                     tokens: 1, latency_ms: 1., cleanup_ms: 0., recalled: vec![],
                 })).unwrap();
@@ -2324,6 +2454,7 @@ mod tests {
             .entered_event_id += 1;
         reply
             .send(Ok(ThinkResult {
+                model_output: None,
                 decision: json!({"summary":"Wait.","plan":[{"kind":"wait","seconds":600}]}),
                 tokens: 1,
                 latency_ms: 1.,
@@ -2415,7 +2546,7 @@ mod tests {
         assert!(requests.try_recv().is_err());
         first
             .1
-            .send(Ok(decision(json!([{"kind":"guard","seconds":600}]))))
+            .send(Ok(decision(json!([{"kind":"wait","seconds":600}]))))
             .unwrap();
         finish(&mut sim).await;
         sim.pump().unwrap();
@@ -2516,10 +2647,13 @@ mod tests {
         sim.pump().unwrap();
         let (correction, reply) = started(&mut requests).await;
         assert_eq!(
-            correction.input["self"]["lastPlanFailure"]["intent"],
+            correction.input["execution"]["self"]["lastPlanFailure"]["intent"],
             json!({"kind":"work","recipe":"meal"})
         );
-        assert_eq!(correction.input["self"]["lastPlanFailure"]["ok"], false);
+        assert_eq!(
+            correction.input["execution"]["self"]["lastPlanFailure"]["ok"],
+            false
+        );
         reply.send(Ok(decision(failed_plan))).unwrap();
         finish(&mut sim).await;
         sim.pump().unwrap();
@@ -2563,14 +2697,14 @@ mod tests {
             let (request, _reply) = started(&mut requests).await;
             assert_eq!(request.actor_id, 102);
             assert_eq!(
-                request.input["self"]["lastActionOutcome"]["intent"],
-                json!({"kind":"take","itemId":1023})
+                request.input["execution"]["self"]["lastActionOutcome"]["intent"],
+                json!({"kind":"take","itemId":1023,"quantity":0})
             );
-            let heard = request.input["recentDialogue"].to_string();
+            let heard = request.input["world"]["roomContext"]["entries"].to_string();
             assert!(heard.contains("Who commands you?"));
             assert!(heard.contains("Can I talk to him?"));
             assert_eq!(
-                request.input["items"]
+                request.input["world"]["items"]
                     .as_array()
                     .unwrap()
                     .iter()

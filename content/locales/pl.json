@@ -275,5 +275,14 @@
   "Hide for five minutes": "Ukryj się na pięć minut",
   "Defend yourself": "Broń się",
   "Make {0}": "Wytwórz: {0}",
-  "Choose --language en or --language pl.": "Wybierz --language en lub --language pl."
+  "Choose --language en or --language pl.": "Wybierz --language en lub --language pl.",
+  "Choose portrait preference": "Wybierz sposób wyświetlania portretów",
+  "Choose a tool": "Wybierz narzędzie",
+  "Choose an amount": "Podaj ilość monet",
+  "Choose the recipient or destination": "Wybierz odbiorcę lub pomieszczenie",
+  "The selected object is no longer available. Choose it again.": "Wybrany obiekt jest już niedostępny. Wybierz go ponownie.",
+  "Loose item": "Do podniesienia",
+  "Held by": "Posiada:",
+  "//text · say text beginning with a slash": "//tekst · wypowiedz tekst zaczynający się ukośnikiem",
+  "Choose a verb, then its object, recipient, and quantity.": "Wybierz komendę, potem przedmiot, odbiorcę i ilość."
 }

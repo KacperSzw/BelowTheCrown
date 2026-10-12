@@ -1,0 +1,2153 @@
+{
+  "source": {
+    "date": "2026-10-12",
+    "review": "natural-dialogue-v2",
+    "serial": 21,
+    "scene": "natural/pl/actual handover: recheck",
+    "controlledScene": true,
+    "note": "Exact captured turn input and model output; execution.people with visible HP was added to current observations after this review."
+  },
+  "runtime": {
+    "model": "gpt-6-luna",
+    "effort": "high",
+    "serviceTier": "default",
+    "nativeCodex": "0.160.1"
+  },
+  "boundIdentity": {
+    "actorId": 106,
+    "biography": "Karmię dwór, który marnuje jedzenie, podczas gdy ludzie niżej liczą skórki chleba. Elżbieta znaczy dla mnie więcej niż dobra opinia możnego. Skradziona racja to jutrzejsza pusta miska; gościnność musi być wyborem, na który mnie stać.",
+    "name": "Jadwiga",
+    "personality": "Liczyłam porcje, kiedy moi ludzie chodzili głodni. Odpowiadam ostro roszczeniowym gębom, pilnuję zapasów i potrafię przepędzić złodzieja; nie czekam radośnie, by załatwiać cudze kłopoty. Łagodniejszy głos i dodatkową porcję zachowuję dla wybranych. Elżbieta znaczy dla mnie więcej niż królewska wygoda. Gniew może skłonić mnie do ryzyka, ale ktoś żądający krwi musi dać mi więcej niż piękne hasło.",
+    "role": "Kucharka"
+  },
+  "turnInput": {
+    "execution": {
+      "actionDetails": [
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 12,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.5,
+            "effects": [],
+            "hint": "przejście do pomieszczenia · 0.5s rzeczywistych / 12s świata"
+          },
+          "intent": {
+            "doorId": 203,
+            "kind": "move"
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 0,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0,
+            "effects": [],
+            "hint": "oglądanie"
+          },
+          "intent": {
+            "kind": "inspect",
+            "targetId": 203
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [],
+            "hint": "zamknięcie drzwi · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "doorId": 203,
+            "kind": "close"
+          },
+          "reason": null
+        },
+        {
+          "available": false,
+          "forecast": {
+            "durationCalendarSeconds": 12,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.5,
+            "effects": [],
+            "hint": "przejście do pomieszczenia · 0.5s rzeczywistych / 12s świata"
+          },
+          "intent": {
+            "doorId": 204,
+            "kind": "move"
+          },
+          "reason": "Drzwi są zamknięte. Otwórz je, zanim przejdziesz."
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 0,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0,
+            "effects": [],
+            "hint": "oglądanie"
+          },
+          "intent": {
+            "kind": "inspect",
+            "targetId": 204
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [],
+            "hint": "otwarcie drzwi · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "doorId": 204,
+            "kind": "open"
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 12,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.5,
+            "effects": [],
+            "hint": "przejście do pomieszczenia · 0.5s rzeczywistych / 12s świata"
+          },
+          "intent": {
+            "doorId": 205,
+            "kind": "move"
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 0,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0,
+            "effects": [],
+            "hint": "oglądanie"
+          },
+          "intent": {
+            "kind": "inspect",
+            "targetId": 205
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [],
+            "hint": "zamknięcie drzwi · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "doorId": 205,
+            "kind": "close"
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 0,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0,
+            "effects": [],
+            "hint": "oglądanie"
+          },
+          "intent": {
+            "kind": "inspect",
+            "targetId": 1011
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "quantity": 1,
+                "transfer": true
+              }
+            ],
+            "hint": "1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 1011,
+            "kind": "drop",
+            "quantity": 1
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "quantity": 1,
+                "transfer": false
+              }
+            ],
+            "hint": "1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 1011,
+            "kind": "offer",
+            "quantity": 1,
+            "targetId": 101
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "quantity": 1,
+                "transfer": true
+              }
+            ],
+            "hint": "1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 1011,
+            "kind": "give",
+            "quantity": 1,
+            "targetId": 101
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "quantity": 1,
+                "transfer": false
+              }
+            ],
+            "hint": "1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 1011,
+            "kind": "offer",
+            "quantity": 1,
+            "targetId": 107
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "quantity": 1,
+                "transfer": true
+              }
+            ],
+            "hint": "1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 1011,
+            "kind": "give",
+            "quantity": 1,
+            "targetId": 107
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 0,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0,
+            "effects": [],
+            "hint": "oglądanie"
+          },
+          "intent": {
+            "kind": "inspect",
+            "targetId": 1012
+          },
+          "reason": null
+        },
+        {
+          "available": false,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "consumes": 1,
+                "delta": -15,
+                "stat": "thirst"
+              }
+            ],
+            "hint": "pragnienie −15 · 1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 1012,
+            "kind": "drink"
+          },
+          "reason": "Nie posiadasz tego przedmiotu."
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "quantity": 1,
+                "transfer": true
+              }
+            ],
+            "hint": "1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 1012,
+            "kind": "take",
+            "quantity": 1
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 0,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0,
+            "effects": [],
+            "hint": "oglądanie"
+          },
+          "intent": {
+            "kind": "inspect",
+            "targetId": 1013
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "consumes": 1,
+                "delta": -28,
+                "stat": "hunger"
+              }
+            ],
+            "hint": "głód −28 · 1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 1013,
+            "kind": "eat"
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "quantity": 1,
+                "transfer": true
+              }
+            ],
+            "hint": "1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 1013,
+            "kind": "drop",
+            "quantity": 1
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "quantity": 1,
+                "transfer": false
+              }
+            ],
+            "hint": "1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 1013,
+            "kind": "offer",
+            "quantity": 1,
+            "targetId": 101
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "quantity": 1,
+                "transfer": true
+              }
+            ],
+            "hint": "1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 1013,
+            "kind": "give",
+            "quantity": 1,
+            "targetId": 101
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "quantity": 1,
+                "transfer": false
+              }
+            ],
+            "hint": "1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 1013,
+            "kind": "offer",
+            "quantity": 1,
+            "targetId": 107
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "quantity": 1,
+                "transfer": true
+              }
+            ],
+            "hint": "1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 1013,
+            "kind": "give",
+            "quantity": 1,
+            "targetId": 107
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 0,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0,
+            "effects": [],
+            "hint": "oglądanie"
+          },
+          "intent": {
+            "kind": "inspect",
+            "targetId": 1025
+          },
+          "reason": null
+        },
+        {
+          "available": false,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "quantity": 1,
+                "transfer": true
+              }
+            ],
+            "hint": "1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 1025,
+            "kind": "take",
+            "quantity": 1
+          },
+          "reason": "To należy do żyjącej osoby. Poproś, zaproponuj wymianę lub spróbuj kradzieży."
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "prediction": "owner_ability_unknown",
+                "successChance": {
+                  "maximum": 0.9,
+                  "minimum": 0.08
+                }
+              },
+              {
+                "quantity": 1,
+                "transfer": true
+              }
+            ],
+            "hint": "powodzenie 8–90% · ryzyko wykrycia · 1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 1025,
+            "kind": "steal",
+            "quantity": 1
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 0,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0,
+            "effects": [],
+            "hint": "oglądanie"
+          },
+          "intent": {
+            "kind": "inspect",
+            "targetId": 901
+          },
+          "reason": null
+        },
+        {
+          "available": false,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "equipped": true,
+                "weaponPower": 14
+              }
+            ],
+            "hint": "moc broni 14 · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 901,
+            "kind": "equip"
+          },
+          "reason": "Nie posiadasz tego przedmiotu."
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [
+              {
+                "quantity": 1,
+                "transfer": true
+              }
+            ],
+            "hint": "1 szt. · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "itemId": 901,
+            "kind": "take",
+            "quantity": 1
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 0,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0,
+            "effects": [],
+            "hint": "oglądanie"
+          },
+          "intent": {
+            "kind": "inspect",
+            "targetId": 101
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 720,
+            "durationKind": "maximum",
+            "durationRealSeconds": 30,
+            "effects": [
+              {
+                "ifDefending": {
+                  "maximum": 5.5,
+                  "minimum": 2
+                },
+                "loss": {
+                  "maximum": 11,
+                  "minimum": 4
+                },
+                "prediction": "conditional",
+                "stat": "health",
+                "targetId": 101
+              }
+            ],
+            "hint": "obrażenia 4–11 HP · przy obronie 2–5.5 · do 30s rzeczywistych / 720s świata; runda może skończyć się wcześniej"
+          },
+          "intent": {
+            "kind": "attack",
+            "style": "lethal",
+            "targetId": 101
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 720,
+            "durationKind": "maximum",
+            "durationRealSeconds": 30,
+            "effects": [
+              {
+                "ifDefending": {
+                  "maximum": 5.5,
+                  "minimum": 2
+                },
+                "loss": {
+                  "maximum": 11,
+                  "minimum": 4
+                },
+                "prediction": "conditional",
+                "stat": "health",
+                "targetId": 101
+              }
+            ],
+            "hint": "obrażenia 4–11 HP · przy obronie 2–5.5 · nieśmiertelne; możliwa nieprzytomność · do 30s rzeczywistych / 720s świata; runda może skończyć się wcześniej"
+          },
+          "intent": {
+            "kind": "attack",
+            "style": "subdue",
+            "targetId": 101
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [],
+            "hint": "przekazanie 5 monet · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "amount": 5,
+            "kind": "pay",
+            "targetId": 101
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 0,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0,
+            "effects": [],
+            "hint": "oglądanie"
+          },
+          "intent": {
+            "kind": "inspect",
+            "targetId": 107
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 720,
+            "durationKind": "maximum",
+            "durationRealSeconds": 30,
+            "effects": [
+              {
+                "ifDefending": {
+                  "maximum": 5.5,
+                  "minimum": 2
+                },
+                "loss": {
+                  "maximum": 11,
+                  "minimum": 4
+                },
+                "prediction": "conditional",
+                "stat": "health",
+                "targetId": 107
+              }
+            ],
+            "hint": "obrażenia 4–11 HP · przy obronie 2–5.5 · do 30s rzeczywistych / 720s świata; runda może skończyć się wcześniej"
+          },
+          "intent": {
+            "kind": "attack",
+            "style": "lethal",
+            "targetId": 107
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 720,
+            "durationKind": "maximum",
+            "durationRealSeconds": 30,
+            "effects": [
+              {
+                "ifDefending": {
+                  "maximum": 5.5,
+                  "minimum": 2
+                },
+                "loss": {
+                  "maximum": 11,
+                  "minimum": 4
+                },
+                "prediction": "conditional",
+                "stat": "health",
+                "targetId": 107
+              }
+            ],
+            "hint": "obrażenia 4–11 HP · przy obronie 2–5.5 · nieśmiertelne; możliwa nieprzytomność · do 30s rzeczywistych / 720s świata; runda może skończyć się wcześniej"
+          },
+          "intent": {
+            "kind": "attack",
+            "style": "subdue",
+            "targetId": 107
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 4.800000000000001,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.2,
+            "effects": [],
+            "hint": "przekazanie 5 monet · 0.2s rzeczywistych / 4.8s świata"
+          },
+          "intent": {
+            "amount": 5,
+            "kind": "pay",
+            "targetId": 107
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 600,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 25,
+            "effects": [],
+            "hint": "zmęczenie maleje; leczenie zależy od potrzeb i przerwań · 25s rzeczywistych / 600s świata"
+          },
+          "intent": {
+            "kind": "rest",
+            "seconds": 600
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 60,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 2.5,
+            "effects": [],
+            "hint": "upływ czasu · 2.5s rzeczywistych / 60s świata"
+          },
+          "intent": {
+            "kind": "wait",
+            "seconds": 60
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 300,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 12.5,
+            "effects": [],
+            "hint": "próba ukrycia; możliwe wykrycie · 12.5s rzeczywistych / 300s świata"
+          },
+          "intent": {
+            "kind": "hide",
+            "seconds": 300
+          },
+          "reason": null
+        },
+        {
+          "available": true,
+          "forecast": {
+            "durationCalendarSeconds": 12,
+            "durationKind": "scheduled",
+            "durationRealSeconds": 0.5,
+            "effects": [],
+            "hint": "1 składnik → 1 Świeża potrawka jęczmienna · 0.5s rzeczywistych / 12s świata"
+          },
+          "intent": {
+            "kind": "work",
+            "recipe": "meal"
+          },
+          "reason": null
+        }
+      ],
+      "availableActions": [
+        {
+          "doorId": 203,
+          "kind": "move"
+        },
+        {
+          "kind": "inspect",
+          "targetId": 203
+        },
+        {
+          "doorId": 203,
+          "kind": "close"
+        },
+        {
+          "kind": "inspect",
+          "targetId": 204
+        },
+        {
+          "doorId": 204,
+          "kind": "open"
+        },
+        {
+          "doorId": 205,
+          "kind": "move"
+        },
+        {
+          "kind": "inspect",
+          "targetId": 205
+        },
+        {
+          "doorId": 205,
+          "kind": "close"
+        },
+        {
+          "kind": "inspect",
+          "targetId": 1011
+        },
+        {
+          "itemId": 1011,
+          "kind": "drop",
+          "quantity": 1
+        },
+        {
+          "itemId": 1011,
+          "kind": "offer",
+          "quantity": 1,
+          "targetId": 101
+        },
+        {
+          "itemId": 1011,
+          "kind": "give",
+          "quantity": 1,
+          "targetId": 101
+        },
+        {
+          "itemId": 1011,
+          "kind": "offer",
+          "quantity": 1,
+          "targetId": 107
+        },
+        {
+          "itemId": 1011,
+          "kind": "give",
+          "quantity": 1,
+          "targetId": 107
+        },
+        {
+          "kind": "inspect",
+          "targetId": 1012
+        },
+        {
+          "itemId": 1012,
+          "kind": "take",
+          "quantity": 1
+        },
+        {
+          "kind": "inspect",
+          "targetId": 1013
+        },
+        {
+          "itemId": 1013,
+          "kind": "eat"
+        },
+        {
+          "itemId": 1013,
+          "kind": "drop",
+          "quantity": 1
+        },
+        {
+          "itemId": 1013,
+          "kind": "offer",
+          "quantity": 1,
+          "targetId": 101
+        },
+        {
+          "itemId": 1013,
+          "kind": "give",
+          "quantity": 1,
+          "targetId": 101
+        },
+        {
+          "itemId": 1013,
+          "kind": "offer",
+          "quantity": 1,
+          "targetId": 107
+        },
+        {
+          "itemId": 1013,
+          "kind": "give",
+          "quantity": 1,
+          "targetId": 107
+        },
+        {
+          "kind": "inspect",
+          "targetId": 1025
+        },
+        {
+          "itemId": 1025,
+          "kind": "steal",
+          "quantity": 1
+        },
+        {
+          "kind": "inspect",
+          "targetId": 901
+        },
+        {
+          "itemId": 901,
+          "kind": "take",
+          "quantity": 1
+        },
+        {
+          "kind": "inspect",
+          "targetId": 101
+        },
+        {
+          "kind": "attack",
+          "style": "lethal",
+          "targetId": 101
+        },
+        {
+          "kind": "attack",
+          "style": "subdue",
+          "targetId": 101
+        },
+        {
+          "amount": 5,
+          "kind": "pay",
+          "targetId": 101
+        },
+        {
+          "kind": "inspect",
+          "targetId": 107
+        },
+        {
+          "kind": "attack",
+          "style": "lethal",
+          "targetId": 107
+        },
+        {
+          "kind": "attack",
+          "style": "subdue",
+          "targetId": 107
+        },
+        {
+          "amount": 5,
+          "kind": "pay",
+          "targetId": 107
+        },
+        {
+          "kind": "rest",
+          "seconds": 600
+        },
+        {
+          "kind": "wait",
+          "seconds": 60
+        },
+        {
+          "kind": "hide",
+          "seconds": 300
+        },
+        {
+          "kind": "work",
+          "recipe": "meal"
+        }
+      ],
+      "combat": null,
+      "reason": "Słyszysz: Elżbieta: “Jadwigo, daj mi jedną miskę potrawki. Zaniosę ją królowi, póki ciepła.”. Odpowiedz, jeśli to wymaga odpowiedzi.",
+      "recipes": [
+        {
+          "availableNow": true,
+          "consumes": "ingredient",
+          "minimum": 20,
+          "recipe": "meal",
+          "roomId": 4,
+          "skill": "craft"
+        },
+        {
+          "availableNow": false,
+          "consumes": "metal",
+          "minimum": 25,
+          "recipe": "lockpick",
+          "roomId": 8,
+          "skill": "craft"
+        },
+        {
+          "availableNow": false,
+          "consumes": "herb",
+          "minimum": 50,
+          "recipe": "medicine",
+          "roomId": 7,
+          "skill": "medicine"
+        }
+      ],
+      "self": {
+        "currentActivity": null,
+        "fatigue": 50,
+        "health": 100,
+        "hunger": 28,
+        "lastActionOutcome": null,
+        "lastPlanFailure": null,
+        "remainingPlan": [],
+        "skills": {
+          "combat": 25,
+          "craft": 80,
+          "medicine": 15,
+          "stealth": 15
+        },
+        "thirst": 15
+      },
+      "speechRule": "Speech follows normal, whisper and shout perception.",
+      "timeRules": {
+        "activitySecondsAre": "calendar",
+        "calendarSecondsPerRealSecond": 24,
+        "physiologySecondsPerRealSecond": 5,
+        "reactionSchedulingUses": "real seconds"
+      }
+    },
+    "language": "pl",
+    "scenarioId": "castle",
+    "world": {
+      "doors": [
+        {
+          "destination": "Dolny korytarz",
+          "destinationId": 3,
+          "id": 203,
+          "locked": false,
+          "name": "Przejście do kuchni",
+          "open": true
+        },
+        {
+          "destination": "Spiżarnia",
+          "destinationId": 5,
+          "id": 204,
+          "locked": false,
+          "name": "Drzwi spiżarni",
+          "open": false
+        },
+        {
+          "destination": "Kwatera służby",
+          "destinationId": 6,
+          "id": 205,
+          "locked": false,
+          "name": "Drzwi służby",
+          "open": true
+        }
+      ],
+      "items": [
+        {
+          "description": "Jadwiga trzyma składniki pod ręką.",
+          "equipped": false,
+          "id": 1011,
+          "key": null,
+          "kind": "ingredient",
+          "name": "Jęczmień kucharki",
+          "ownerId": 106,
+          "poisonRecognized": false,
+          "quantity": 3
+        },
+        {
+          "description": "Przykryty dzban z wodą na sześć kubków.",
+          "equipped": false,
+          "id": 1012,
+          "kind": "water",
+          "name": "Woda z kuchni",
+          "ownerId": null,
+          "poisonRecognized": false,
+          "quantity": 6
+        },
+        {
+          "description": "Przy palenisku stoją dwie miski ciepłego gulaszu jęczmiennego.",
+          "equipped": false,
+          "id": 1013,
+          "key": null,
+          "kind": "food",
+          "name": "Gulasz na kolację",
+          "ownerId": 106,
+          "poisonRecognized": false,
+          "quantity": 2
+        },
+        {
+          "description": "Strój roboczy Elżbiety wskazuje, że należy do służby.",
+          "equipped": true,
+          "id": 1025,
+          "kind": "clothes",
+          "name": "Liberia Elżbiety",
+          "ownerId": 107,
+          "poisonRecognized": false,
+          "quantity": 1
+        },
+        {
+          "description": "Ostry nóż kuchenny z mocną drewnianą rękojeścią.",
+          "equipped": false,
+          "id": 901,
+          "kind": "weapon",
+          "name": "Nóż kuchenny",
+          "ownerId": null,
+          "poisonRecognized": false,
+          "quantity": 1
+        }
+      ],
+      "knownMap": [
+        {
+          "connections": [
+            {
+              "doorId": 202,
+              "to": 3
+            }
+          ],
+          "id": 2,
+          "name": "Kwatera straży"
+        },
+        {
+          "connections": [
+            {
+              "doorId": 202,
+              "to": 2
+            },
+            {
+              "doorId": 203,
+              "to": 4
+            },
+            {
+              "doorId": 206,
+              "to": 7
+            },
+            {
+              "doorId": 208,
+              "to": 9
+            }
+          ],
+          "id": 3,
+          "name": "Dolny korytarz"
+        },
+        {
+          "connections": [
+            {
+              "doorId": 203,
+              "to": 3
+            },
+            {
+              "doorId": 204,
+              "to": 5
+            },
+            {
+              "doorId": 205,
+              "to": 6
+            }
+          ],
+          "id": 4,
+          "name": "Kuchnia"
+        },
+        {
+          "connections": [
+            {
+              "doorId": 204,
+              "to": 4
+            }
+          ],
+          "id": 5,
+          "name": "Spiżarnia"
+        },
+        {
+          "connections": [
+            {
+              "doorId": 205,
+              "to": 4
+            },
+            {
+              "doorId": 212,
+              "to": 10
+            },
+            {
+              "doorId": 213,
+              "to": 12
+            }
+          ],
+          "id": 6,
+          "name": "Kwatera służby"
+        },
+        {
+          "connections": [
+            {
+              "doorId": 206,
+              "to": 3
+            }
+          ],
+          "id": 7,
+          "name": "Lazaret"
+        },
+        {
+          "connections": [
+            {
+              "doorId": 208,
+              "to": 3
+            },
+            {
+              "doorId": 209,
+              "to": 10
+            },
+            {
+              "doorId": 211,
+              "to": 12
+            }
+          ],
+          "id": 9,
+          "name": "Dziedziniec"
+        },
+        {
+          "connections": [
+            {
+              "doorId": 209,
+              "to": 9
+            },
+            {
+              "doorId": 212,
+              "to": 6
+            }
+          ],
+          "id": 10,
+          "name": "Wielka sala"
+        },
+        {
+          "connections": [
+            {
+              "doorId": 211,
+              "to": 9
+            },
+            {
+              "doorId": 213,
+              "to": 6
+            }
+          ],
+          "id": 12,
+          "name": "Budynek bramny"
+        }
+      ],
+      "knownPeople": [
+        {
+          "aliases": [
+            "Edric",
+            "Edrica",
+            "Edricem",
+            "Edricowi",
+            "Edricu",
+            "Eryk",
+            "Eryka",
+            "Erykiem",
+            "Erykowi",
+            "Eryku"
+          ],
+          "id": 102,
+          "name": "Eryk",
+          "role": "Strażnik lochu"
+        },
+        {
+          "aliases": [
+            "Alaric",
+            "Alarica",
+            "Alaricem",
+            "Alaricowi",
+            "Alaricu",
+            "Kazimierz",
+            "Kazimierza",
+            "Kazimierzem",
+            "Kazimierzowi",
+            "Kazimierzu"
+          ],
+          "id": 103,
+          "name": "Kazimierz",
+          "role": "Król"
+        },
+        {
+          "aliases": [
+            "Mara",
+            "Marcus",
+            "Marek",
+            "Marka",
+            "Markiem",
+            "Markowi",
+            "Marku",
+            "Maro",
+            "Mary",
+            "Marze",
+            "Marą",
+            "Marę"
+          ],
+          "id": 104,
+          "name": "Marek",
+          "role": "dowódca straży"
+        },
+        {
+          "aliases": [
+            "Mikołaj",
+            "Mikołaja",
+            "Mikołajem",
+            "Mikołajowi",
+            "Mikołaju",
+            "Oswin",
+            "Oswina",
+            "Oswinem",
+            "Oswinie",
+            "Oswinowi"
+          ],
+          "id": 105,
+          "name": "Mikołaj",
+          "role": "Zarządca"
+        },
+        {
+          "aliases": [
+            "Jadwidze",
+            "Jadwiga",
+            "Jadwigi",
+            "Jadwigo",
+            "Jadwigą",
+            "Jadwigę",
+            "Tamsin"
+          ],
+          "id": 106,
+          "name": "Jadwiga",
+          "role": "Kucharka"
+        },
+        {
+          "aliases": [
+            "Elsa",
+            "Elsie",
+            "Elso",
+            "Elsy",
+            "Elsą",
+            "Elsę",
+            "Elżbiecie",
+            "Elżbieta",
+            "Elżbieto",
+            "Elżbiety",
+            "Elżbietą",
+            "Elżbietę"
+          ],
+          "id": 107,
+          "name": "Elżbieta",
+          "role": "Służąca"
+        },
+        {
+          "aliases": [
+            "Irena",
+            "Irenie",
+            "Ireno",
+            "Ireny",
+            "Ireną",
+            "Irenę"
+          ],
+          "id": 108,
+          "name": "Irena",
+          "role": "Lekarka"
+        },
+        {
+          "aliases": [
+            "Bran",
+            "Brana",
+            "Branem",
+            "Branie",
+            "Branowi",
+            "Bronisław",
+            "Bronisława",
+            "Bronisławem",
+            "Bronisławie",
+            "Bronisławowi"
+          ],
+          "id": 109,
+          "name": "Bronisław",
+          "role": "Kowal"
+        },
+        {
+          "aliases": [
+            "Lucien",
+            "Luciena",
+            "Lucienem",
+            "Lucienie",
+            "Lucienowi",
+            "Lucjan",
+            "Lucjana",
+            "Lucjanem",
+            "Lucjanie",
+            "Lucjanowi"
+          ],
+          "id": 110,
+          "name": "Lucjan",
+          "role": "Dworzanin"
+        },
+        {
+          "aliases": [
+            "Bogdan",
+            "Bogdana",
+            "Bogdanem",
+            "Bogdanie",
+            "Bogdanowi",
+            "Hobb",
+            "Hobba",
+            "Hobbem",
+            "Hobbie",
+            "Hobbowi"
+          ],
+          "id": 111,
+          "name": "Bogdan",
+          "role": "Odźwierny"
+        }
+      ],
+      "memories": [
+        {
+          "actorId": 106,
+          "eventId": null,
+          "evidenceIds": [],
+          "id": 18,
+          "importance": 8,
+          "kind": "background",
+          "sourceId": 106,
+          "text": "Jedna racja jęczmienia daje jedną miskę gulaszu, gdy pracujesz w kuchni. Składniki są rzeczywistymi zapasami.",
+          "time": 64800
+        },
+        {
+          "actorId": 106,
+          "eventId": null,
+          "evidenceIds": [],
+          "id": 19,
+          "importance": 8,
+          "kind": "background",
+          "sourceId": 106,
+          "text": "Elżbieta zwykle dostarcza królowi kolację; obie możecie przenosić jedzenie schodami służbowymi.",
+          "time": 64800
+        },
+        {
+          "actorId": 106,
+          "eventId": null,
+          "evidenceIds": [],
+          "id": 20,
+          "importance": 8,
+          "kind": "background",
+          "sourceId": 106,
+          "text": "Król lubi przykrytą miskę gulaszu. Nie otrujesz kogoś ot tak.",
+          "time": 64800
+        },
+        {
+          "actorId": 106,
+          "eventId": null,
+          "evidenceIds": [],
+          "id": 21,
+          "importance": 8,
+          "kind": "background",
+          "sourceId": 106,
+          "text": "Mikołaj zachowuje się nerwowo przy słoju w spiżarni, pod którym leży złożony list.",
+          "time": 64800
+        }
+      ],
+      "offers": [],
+      "people": [
+        {
+          "activity": "obserwuje",
+          "condition": "wygląda zdrowo",
+          "equipment": [],
+          "id": 101,
+          "name": "Marta",
+          "role": "Więzień"
+        },
+        {
+          "activity": "obserwuje",
+          "condition": "wygląda zdrowo",
+          "equipment": [
+            {
+              "id": 1025,
+              "name": "Liberia Elżbiety"
+            }
+          ],
+          "id": 107,
+          "name": "Elżbieta",
+          "role": "Służąca"
+        }
+      ],
+      "plots": [],
+      "room": {
+        "cover": true,
+        "description": "Od paleniska bije przyjemne, ciężkie ciepło. Sadza pokrywa belki nad kamiennymi blatami.",
+        "id": 4,
+        "name": "Kuchnia",
+        "prison": false
+      },
+      "roomContext": {
+        "entries": [
+          {
+            "ageCalendarSeconds": 0,
+            "clock": "Dzień 1 · 18:00",
+            "count": 1,
+            "eventId": 2,
+            "evidenceIds": [
+              43
+            ],
+            "id": 43,
+            "kind": "heard",
+            "lastAgeCalendarSeconds": 0,
+            "lastEventId": 2,
+            "lastTime": 64800,
+            "legacyMetadataUnknown": false,
+            "perceived": {
+              "recipientId": null,
+              "recipientKnown": true,
+              "recipientName": null,
+              "roomId": 4,
+              "speakerName": "Elżbieta",
+              "type": "speech",
+              "volume": "normal"
+            },
+            "sourceId": 107,
+            "text": "Elżbieta: “Jadwigo, daj mi jedną miskę potrawki. Zaniosę ją królowi, póki ciepła.”",
+            "time": 64800
+          }
+        ],
+        "omittedOlderEntries": false,
+        "roomId": 4,
+        "visitEventId": 0
+      },
+      "self": {
+        "activity": "obserwuje",
+        "aliases": [
+          "Jadwidze",
+          "Jadwiga",
+          "Jadwigi",
+          "Jadwigo",
+          "Jadwigą",
+          "Jadwigę",
+          "Tamsin"
+        ],
+        "coins": 8,
+        "commitments": [],
+        "condition": "wygląda zdrowo",
+        "goals": [
+          "Chcę przygotować posiłek dla króla i nakarmić domowników.",
+          "Chcę chronić zapasy spiżarni.",
+          "Chcę znaleźć czas na picie i odpoczynek."
+        ],
+        "id": 106,
+        "lastSummary": "A new evening begins.",
+        "name": "Jadwiga",
+        "relationships": {
+          "102": {
+            "affection": 20,
+            "fear": 0,
+            "respect": 20,
+            "trust": 35
+          },
+          "103": {
+            "affection": -25,
+            "fear": 45,
+            "respect": 10,
+            "trust": 0
+          },
+          "105": {
+            "affection": 0,
+            "fear": 15,
+            "respect": 10,
+            "trust": 5
+          },
+          "107": {
+            "affection": 80,
+            "fear": 0,
+            "respect": 40,
+            "trust": 75
+          }
+        },
+        "role": "Kucharka"
+      },
+      "time": 64800
+    }
+  },
+  "availableTools": [
+    {
+      "type": "function",
+      "name": "recall",
+      "description": "Read-only search of your own memories. Returns evidence IDs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 180
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "toolCalls": [],
+  "modelOutput": {
+    "acceptHeardProposals": [],
+    "acceptPlots": [],
+    "goals": [
+      "Przygotować posiłek dla króla i nakarmić domowników.",
+      "Chronić zapasy spiżarni.",
+      "Znaleźć czas na picie i odpoczynek."
+    ],
+    "memories": [],
+    "plan": [
+      {
+        "kind": "work",
+        "recipe": "meal"
+      },
+      {
+        "itemId": 1013,
+        "kind": "give",
+        "quantity": 1,
+        "targetId": 107
+      }
+    ],
+    "relationships": [],
+    "summary": "Elżbieta zanosi kolację królowi, więc oddam jej jedną miskę gulaszu, a potem przygotuję świeżą potrawkę.",
+    "utterance": {
+      "afterSteps": 0,
+      "plot": null,
+      "targetId": 107,
+      "text": "Weź tę miskę, Elżbieto. Nie każ królowi czekać, aż zrobię następną.",
+      "volume": "normal"
+    }
+  },
+  "normalizedDecision": {
+    "acceptHeardProposals": [],
+    "acceptPlots": [],
+    "goals": [
+      "Przygotować posiłek dla króla i nakarmić domowników.",
+      "Chronić zapasy spiżarni.",
+      "Znaleźć czas na picie i odpoczynek."
+    ],
+    "memories": [],
+    "plan": [
+      {
+        "kind": "speak",
+        "plot": null,
+        "targetId": 107,
+        "text": "Weź tę miskę, Elżbieto. Nie każ królowi czekać, aż zrobię następną.",
+        "volume": "normal"
+      },
+      {
+        "kind": "work",
+        "recipe": "meal"
+      },
+      {
+        "itemId": 1013,
+        "kind": "give",
+        "quantity": 1,
+        "targetId": 107
+      }
+    ],
+    "relationships": [],
+    "summary": "Elżbieta zanosi kolację królowi, więc oddam jej jedną miskę gulaszu, a potem przygotuję świeżą potrawkę."
+  },
+  "validation": {
+    "message": "Decyzja postaci została przyjęta.",
+    "ok": true
+  },
+  "before": {
+    "activity": null,
+    "goals": [
+      "I want to prepare a meal for the king and feed the household.",
+      "I want to protect the pantry stores.",
+      "I want to find time to drink and rest."
+    ],
+    "health": 100,
+    "hunger": 28,
+    "inventory": [
+      {
+        "causes": [],
+        "description": "Tamsin has kept ingredients close at hand.",
+        "equipped": false,
+        "id": 1011,
+        "key": null,
+        "kind": "ingredient",
+        "name": "Cook’s barley",
+        "ownerId": 106,
+        "poisonedBy": null,
+        "power": 0,
+        "quantity": 3,
+        "roomId": null,
+        "textOrigin": {
+          "id": 1011,
+          "kind": "authored"
+        },
+        "visible": false
+      },
+      {
+        "causes": [],
+        "description": "Two bowls of warm barley stew stand near the hearth.",
+        "equipped": false,
+        "id": 1013,
+        "key": null,
+        "kind": "food",
+        "name": "Stew for supper",
+        "ownerId": 106,
+        "poisonedBy": null,
+        "power": 45,
+        "quantity": 2,
+        "roomId": null,
+        "textOrigin": {
+          "id": 1013,
+          "kind": "authored"
+        },
+        "visible": true
+      }
+    ],
+    "lastActionOutcome": null,
+    "plan": [],
+    "relationships": {
+      "102": {
+        "affection": 20,
+        "fear": 0,
+        "respect": 20,
+        "trust": 35
+      },
+      "103": {
+        "affection": -25,
+        "fear": 45,
+        "respect": 10,
+        "trust": 0
+      },
+      "105": {
+        "affection": 0,
+        "fear": 15,
+        "respect": 10,
+        "trust": 5
+      },
+      "107": {
+        "affection": 80,
+        "fear": 0,
+        "respect": 40,
+        "trust": 75
+      }
+    },
+    "roomId": 4,
+    "summary": "A new evening begins.",
+    "thirst": 15
+  },
+  "after": {
+    "activity": null,
+    "goals": [
+      "Przygotować posiłek dla króla i nakarmić domowników.",
+      "Chronić zapasy spiżarni.",
+      "Znaleźć czas na picie i odpoczynek."
+    ],
+    "health": 100,
+    "hunger": 28,
+    "inventory": [
+      {
+        "causes": [],
+        "description": "Tamsin has kept ingredients close at hand.",
+        "equipped": false,
+        "id": 1011,
+        "key": null,
+        "kind": "ingredient",
+        "name": "Cook’s barley",
+        "ownerId": 106,
+        "poisonedBy": null,
+        "power": 0,
+        "quantity": 2,
+        "roomId": null,
+        "textOrigin": {
+          "id": 1011,
+          "kind": "authored"
+        },
+        "visible": false
+      },
+      {
+        "causes": [],
+        "description": "Two bowls of warm barley stew stand near the hearth.",
+        "equipped": false,
+        "id": 1013,
+        "key": null,
+        "kind": "food",
+        "name": "Stew for supper",
+        "ownerId": 106,
+        "poisonedBy": null,
+        "power": 45,
+        "quantity": 1,
+        "roomId": null,
+        "textOrigin": {
+          "id": 1013,
+          "kind": "authored"
+        },
+        "visible": true
+      },
+      {
+        "causes": [
+          5
+        ],
+        "description": "Miska przygotowana z jednej prawdziwej porcji jęczmienia.",
+        "equipped": false,
+        "id": 1028,
+        "key": null,
+        "kind": "food",
+        "name": "Świeża potrawka jęczmienna",
+        "ownerId": 106,
+        "poisonedBy": null,
+        "power": 45,
+        "quantity": 1,
+        "roomId": null,
+        "textOrigin": {
+          "id": "meal",
+          "kind": "recipe"
+        },
+        "visible": true
+      }
+    ],
+    "lastActionOutcome": {
+      "intent": {
+        "itemId": 1013,
+        "kind": "give",
+        "quantity": 1,
+        "targetId": 107
+      },
+      "ok": true,
+      "reason": "Jadwiga przekazuje Gulasz na kolację ×1 osobie Elżbieta.",
+      "stage": "resolved",
+      "time": 64816.8
+    },
+    "plan": [],
+    "relationships": {
+      "102": {
+        "affection": 20,
+        "fear": 0,
+        "respect": 20,
+        "trust": 35
+      },
+      "103": {
+        "affection": -25,
+        "fear": 45,
+        "respect": 10,
+        "trust": 0
+      },
+      "105": {
+        "affection": 0,
+        "fear": 15,
+        "respect": 10,
+        "trust": 5
+      },
+      "107": {
+        "affection": 80,
+        "fear": 0,
+        "respect": 40,
+        "trust": 75
+      }
+    },
+    "roomId": 4,
+    "summary": "Elżbieta zanosi kolację królowi, więc oddam jej jedną miskę gulaszu, a potem przygotuję świeżą potrawkę.",
+    "thirst": 15
+  },
+  "recipientAfter": {
+    "activity": null,
+    "goals": [
+      "I want to collect supper and carry it to the king.",
+      "I want to find out what happened to my brother.",
+      "I want to keep Tamsin and my mother safe."
+    ],
+    "health": 100,
+    "hunger": 45,
+    "inventory": [
+      {
+        "causes": [],
+        "description": "Elsa’s work clothes mark her as a servant.",
+        "equipped": true,
+        "id": 1025,
+        "key": null,
+        "kind": "clothes",
+        "name": "Elsa’s livery",
+        "ownerId": 107,
+        "poisonedBy": null,
+        "power": 0,
+        "quantity": 1,
+        "roomId": null,
+        "textOrigin": {
+          "id": 1025,
+          "kind": "authored"
+        },
+        "visible": true
+      },
+      {
+        "causes": [],
+        "description": "Two bowls of warm barley stew stand near the hearth.",
+        "equipped": false,
+        "id": 1029,
+        "key": null,
+        "kind": "food",
+        "name": "Stew for supper",
+        "ownerId": 107,
+        "poisonedBy": null,
+        "power": 45,
+        "quantity": 1,
+        "roomId": null,
+        "textOrigin": {
+          "id": 1013,
+          "kind": "authored"
+        },
+        "visible": true
+      }
+    ],
+    "lastActionOutcome": {
+      "intent": {
+        "kind": "speak",
+        "plot": null,
+        "targetId": null,
+        "text": "Jadwigo, daj mi jedną miskę potrawki. Zaniosę ją królowi, póki ciepła.",
+        "volume": "normal"
+      },
+      "ok": true,
+      "reason": "Twoje słowa zostały wypowiedziane.",
+      "stage": "resolved",
+      "time": 64800
+    },
+    "plan": [],
+    "relationships": {
+      "102": {
+        "affection": 25,
+        "fear": 10,
+        "respect": 15,
+        "trust": 20
+      },
+      "103": {
+        "affection": -80,
+        "fear": 60,
+        "respect": -20,
+        "trust": -65
+      },
+      "106": {
+        "affection": 85,
+        "fear": 0,
+        "respect": 55,
+        "trust": 80
+      },
+      "108": {
+        "affection": 30,
+        "fear": 0,
+        "respect": 50,
+        "trust": 50
+      }
+    },
+    "roomId": 4,
+    "summary": "A new evening begins.",
+    "thirst": 30
+  },
+  "events": [
+    {
+      "actorId": null,
+      "audience": [
+        101
+      ],
+      "causes": [],
+      "id": 1,
+      "kind": "notice",
+      "roomId": 1,
+      "text": "Wilgotny kamień. Dogasająca pochodnia. Jeden strażnik siedzi przy zamkniętych drzwiach. Nad tobą zamek żyje dalej.",
+      "time": 64800
+    },
+    {
+      "actorId": 107,
+      "audience": [
+        101,
+        106,
+        107
+      ],
+      "causes": [],
+      "details": {
+        "recipientId": null,
+        "recipientKnown": true,
+        "recipientName": null,
+        "speakerName": "Elżbieta",
+        "type": "speech",
+        "volume": "normal"
+      },
+      "id": 2,
+      "kind": "speech",
+      "roomId": 4,
+      "sound": "speech",
+      "text": "Elżbieta: “Jadwigo, daj mi jedną miskę potrawki. Zaniosę ją królowi, póki ciepła.”",
+      "time": 64800
+    },
+    {
+      "actorId": 106,
+      "audience": [
+        101,
+        106,
+        107
+      ],
+      "causes": [],
+      "details": {
+        "recipientId": 107,
+        "recipientKnown": true,
+        "recipientName": "Elżbieta",
+        "speakerName": "Jadwiga",
+        "type": "speech",
+        "volume": "normal"
+      },
+      "id": 3,
+      "kind": "speech",
+      "roomId": 4,
+      "sound": "speech",
+      "text": "Jadwiga: “Weź tę miskę, Elżbieto. Nie każ królowi czekać, aż zrobię następną.”",
+      "time": 64800
+    },
+    {
+      "actorId": 106,
+      "audience": [
+        106
+      ],
+      "causes": [],
+      "details": {
+        "type": "activity_started"
+      },
+      "id": 4,
+      "kind": "private",
+      "roomId": 4,
+      "text": "Zaczynasz: pracować.",
+      "time": 64800
+    },
+    {
+      "actorId": 106,
+      "audience": [
+        101,
+        106,
+        107
+      ],
+      "causes": [],
+      "id": 5,
+      "kind": "action",
+      "roomId": 4,
+      "sound": "craft",
+      "text": "Jadwiga przygotowuje Świeża potrawka jęczmienna, zużywając jeden składnik: Jęczmień kucharki.",
+      "time": 64812
+    },
+    {
+      "actorId": 106,
+      "audience": [
+        106
+      ],
+      "causes": [],
+      "details": {
+        "type": "activity_started"
+      },
+      "id": 6,
+      "kind": "private",
+      "roomId": 4,
+      "text": "Zaczynasz: przekazać.",
+      "time": 64812
+    },
+    {
+      "actorId": 106,
+      "audience": [
+        101,
+        106,
+        107
+      ],
+      "causes": [],
+      "id": 7,
+      "kind": "action",
+      "roomId": 4,
+      "sound": "item",
+      "text": "Jadwiga przekazuje Gulasz na kolację ×1 osobie Elżbieta.",
+      "time": 64816.8
+    }
+  ],
+  "timing": {
+    "inferenceMs": 8048.022359999999,
+    "cleanupMs": 0.058545,
+    "totalMs": 8058.1255439999995,
+    "tokens": 11932
+  },
+  "reviewSummary": {
+    "authorizedDecisions": 24,
+    "usedDecisions": 24,
+    "acceptedDecisions": 22,
+    "rejectedDecisions": 2,
+    "laterExecutionFailures": 3,
+    "toolCalls": 0,
+    "limitations": [
+      "Some self-care plans postponed drinking.",
+      "EN cook repeated cooking instead of giving the ready meal.",
+      "PL servant proposed an unrelated subdue attack while asking politely for the bowl."
+    ]
+  }
+}

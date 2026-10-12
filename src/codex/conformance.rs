@@ -20,7 +20,7 @@ fn response(sequence: usize, recall: bool, listener: bool) -> String {
         let text = if listener {
             json!({"summary":"A test intention.","plan":[]})
         } else {
-            json!({"summary":"A test intention.","goals":[],"plan":[{"kind":"guard","seconds":600}],"memories":[],"relationships":[],"acceptPlots":[],"acceptHeardProposals":[]})
+            json!({"summary":"A test intention.","goals":[],"utterance":{"text":"A test utterance.","targetId":null,"volume":"normal","plot":null,"afterSteps":0},"plan":[{"kind":"wait","seconds":600}],"memories":[],"relationships":[],"acceptPlots":[],"acceptHeardProposals":[]})
         };
         json!({"type":"message","role":"assistant","id":format!("message-{sequence}"),"content":[{"type":"output_text","text":text.to_string()}]})
     };
@@ -161,7 +161,7 @@ fn check_payload(
     let wire_input = |request: &ThinkRequest| {
         let mut value = request.input.clone();
         if !request.listener
-            && let Some(own) = value["self"].as_object_mut()
+            && let Some(own) = value["world"]["self"].as_object_mut()
         {
             own.remove("biography");
             own.remove("personality");
@@ -308,10 +308,11 @@ async fn codex_request_conformance() -> Result<()> {
             let mut expected=vec![];
             for (index,(actor,listener)) in [(102,false),(101,true),(102,false),(103,false)].into_iter().enumerate() {
                 let identity=if listener {None}else{Some(engine.npc_identity(actor)?)};
-                let request=ThinkRequest {actor_id:actor,branch:engine.world.branch.clone(),token:DecisionToken{job_id:index as u64+1,context_generation:0},input:json!({"observation":format!("current-{index}"),"self":{"id":actor,"biography":identity.as_ref().map(|i|&i.biography),"personality":identity.as_ref().map(|i|&i.personality)}}),identity,listener};
+                let request=ThinkRequest {actor_id:actor,branch:engine.world.branch.clone(),token:DecisionToken{job_id:index as u64+1,context_generation:0},input:json!({"observation":format!("current-{index}"),"world":{"self":{"id":actor,"biography":identity.as_ref().map(|i|&i.biography),"personality":identity.as_ref().map(|i|&i.personality)}}}),identity,listener};
                 let cancellation=CancellationToken::new();
                 let mut thinking=driver.think(request.clone(),cancellation.clone());
                 let result=tokio::select! { result=&mut thinking=>result, _=tokio::time::sleep(Duration::from_secs(30))=>{cancellation.cancel();let _=thinking.await;bail!("Mock decision timed out")} }?;
+                if !listener {ensure!(result.decision["plan"][0]["kind"]=="speak" && result.decision["plan"][1]["kind"]=="wait" && result.model_output.as_ref().is_some_and(|v|v["utterance"]["afterSteps"]==0), "Native utterance did not normalize into the canonical execution order");}
                 if index==0 {ensure!(result.recalled==vec![987],"Recall evidence missing");} else {ensure!(result.recalled.is_empty(),"Another decision inherited recalled evidence");}
                 expected.push(request);
             }

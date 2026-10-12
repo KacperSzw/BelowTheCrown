@@ -129,7 +129,7 @@ pub fn migrate_world(mut raw: Value) -> Result<WorldState> {
         .get("format")
         .and_then(Value::as_u64)
         .context("Missing world format.")?;
-    ensure!((1..=4).contains(&format), "Unsupported world format.");
+    ensure!((1..=5).contains(&format), "Unsupported world format.");
     let time = raw
         .get("time")
         .and_then(Value::as_f64)
@@ -165,9 +165,23 @@ pub fn migrate_world(mut raw: Value) -> Result<WorldState> {
         .entry("interactionTime")
         .or_insert(json!(interaction));
     object.entry("encounters").or_insert(json!([]));
-    object.insert("format".into(), json!(4));
+    object.insert("format".into(), json!(5));
     object.remove("speed");
     let mut world: WorldState = serde_json::from_value(raw).context("Corrupt world snapshot.")?;
+    if format < 5 {
+        for actor in &mut world.actors {
+            for intent in actor.plan.iter_mut().chain(
+                actor
+                    .activity
+                    .iter_mut()
+                    .map(|activity| &mut activity.intent),
+            ) {
+                if let Intent::Guard { seconds } = intent {
+                    *intent = Intent::Wait { seconds: *seconds };
+                }
+            }
+        }
+    }
     if format < 4 {
         for actor in &mut world.actors {
             if format < 3
@@ -217,7 +231,7 @@ pub fn migrate_world(mut raw: Value) -> Result<WorldState> {
                 .context("Attack has no target.")?;
             if let Some(actor) = world.actors.iter_mut().find(|a| a.id == source) {
                 actor.activity = None;
-                actor.plan.clear();
+                actor.clear_plan();
             }
             let Some(attacker) = world.actors.iter().find(|a| a.id == source) else {
                 continue;
@@ -273,7 +287,7 @@ pub fn migrate_world(mut raw: Value) -> Result<WorldState> {
 
 pub fn assert_world(world: &WorldState) -> Result<()> {
     ensure!(
-        world.format == 4
+        world.format == 5
             && matches!(world.language.as_str(), "en" | "pl")
             && matches!(world.mode.as_str(), "solo" | "multiplayer")
             && matches!(world.ending.as_str(), "playing" | "victory" | "death"),
@@ -830,6 +844,20 @@ impl Store {
         allocation: [usize; 3],
         excluded: &[u64],
     ) -> Result<Vec<Memory>> {
+        self.recall_with_ranges(
+            actor,
+            query,
+            allocation,
+            &excluded.iter().map(|id| [*id, *id]).collect::<Vec<_>>(),
+        )
+    }
+    pub fn recall_with_ranges(
+        &self,
+        actor: u16,
+        query: &str,
+        allocation: [usize; 3],
+        excluded: &[[u64; 2]],
+    ) -> Result<Vec<Memory>> {
         let limit = allocation
             .iter()
             .try_fold(0usize, |sum, n| sum.checked_add(*n))
@@ -842,7 +870,7 @@ impl Store {
         let candidates = limit.saturating_mul(3).min(i64::MAX as usize) as i64;
         let load = |ranking: &str| -> Result<Vec<Memory>> {
             let sql = format!(
-                "SELECT data FROM memories WHERE actor_id=?1 AND id NOT IN (SELECT value FROM json_each(?2)) {ranking} LIMIT ?4"
+                "SELECT data FROM memories WHERE actor_id=?1 AND NOT EXISTS (SELECT 1 FROM json_each(?2) WHERE memories.id BETWEEN json_extract(value,'$[0]') AND json_extract(value,'$[1]')) {ranking} LIMIT ?4"
             );
             let mut statement = self.db.prepare(&sql)?;
             statement
@@ -965,7 +993,7 @@ impl Store {
                 memories.push(serde_json::from_str(&row?)?);
             }
             let save = SaveData {
-                format: 4,
+                format: 5,
                 world: world.clone(),
                 memories,
                 events: self.events(None, i64::MAX as usize)?,
@@ -993,7 +1021,7 @@ impl Store {
         ensure!(
             raw.get("format")
                 .and_then(Value::as_u64)
-                .is_some_and(|n| (1..=4).contains(&n)),
+                .is_some_and(|n| (1..=5).contains(&n)),
             "Unsupported save format."
         );
         let world = migrate_world(raw.get("world").context("Missing saved world.")?.clone())?;
@@ -1002,7 +1030,7 @@ impl Store {
         let events: Vec<WorldEvent> =
             serde_json::from_value(raw.get("events").context("Missing saved journal.")?.clone())?;
         let save = SaveData {
-            format: 4,
+            format: 5,
             world,
             memories,
             events,
@@ -1048,7 +1076,7 @@ impl Store {
 
 pub fn validate_snapshot(save: &SaveData) -> Result<()> {
     assert_world(&save.world)?;
-    ensure!(save.format == 4, "Unsupported save format.");
+    ensure!(save.format == 5, "Unsupported save format.");
     ensure!(
         save.world.revision < u64::MAX,
         "World revision is exhausted."

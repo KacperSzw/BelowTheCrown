@@ -11,7 +11,7 @@ fn request() -> ThinkRequest {
             context_generation: 2,
         },
         identity: Some(engine.npc_identity(102).unwrap()),
-        input: json!({"self":{"id":102},"observation":"current"}),
+        input: json!({"world":{"self":{"id":102}},"execution":{"reason":"current"}}),
         listener: false,
     }
 }
@@ -58,7 +58,7 @@ async fn thread_ack(rpc: &Rpc, start: &Value, thread: &str, model: &str) {
     reply(rpc,start,json!({"model":model,"reasoningEffort":EFFORT,"serviceTier":null,"instructionSources":[],"thread":{"id":thread}})).await;
 }
 async fn completed(rpc: &Rpc, thread: &str, turn: &str) {
-    rpc.inject(json!({"method":"item/completed","params":{"threadId":thread,"turnId":turn,"item":{"type":"agentMessage","text":json!({"summary":"Current concern.","goals":[],"plan":[{"kind":"guard","seconds":600}],"memories":[],"relationships":[],"acceptPlots":[],"acceptHeardProposals":[]}).to_string()}}})).await.unwrap();
+    rpc.inject(json!({"method":"item/completed","params":{"threadId":thread,"turnId":turn,"item":{"type":"agentMessage","text":json!({"summary":"Current concern.","goals":[],"utterance":null,"plan":[{"kind":"wait","seconds":600}],"memories":[],"relationships":[],"acceptPlots":[],"acceptHeardProposals":[]}).to_string()}}})).await.unwrap();
     rpc.inject(json!({"method":"turn/completed","params":{"threadId":thread,"turn":{"id":turn,"status":"completed"}}})).await.unwrap();
 }
 async fn close_thread(rpc: &Rpc, outgoing: &mut broadcast::Receiver<Value>, thread: &str) {

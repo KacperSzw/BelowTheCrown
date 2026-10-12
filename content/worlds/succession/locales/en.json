@@ -12,7 +12,7 @@
     },
     "2": {
       "name": "Guard quarters",
-      "description": "Boots dry beside a brazier. A shift ledger lies open on a scarred table; empty mugs mark the absent watch."
+      "description": "A brazier warms soot-darkened walls. Years of watchmen have scarred the long table."
     },
     "3": {
       "name": "Lower passage",
@@ -20,23 +20,23 @@
     },
     "4": {
       "name": "Kitchen",
-      "description": "The hearth gives off a thick, welcome heat. Supper waits in covered bowls, and someone has counted every portion."
+      "description": "The hearth gives off a thick, welcome heat. Soot darkens the beams above the stone worktops."
     },
     "5": {
       "name": "Pantry",
-      "description": "Sacks of barley stand beneath old tallies. The onions and dust hide no written order."
+      "description": "Deep shelves line a cool pantry. The air smells faintly of onions and old grain."
     },
     "6": {
       "name": "Servants’ quarters",
-      "description": "Narrow beds surround a table. A folded memorandum lies beneath a spare livery beside the service stair."
+      "description": "Narrow beds surround a small table beside the service stairs. Voices carry easily between the close walls."
     },
     "7": {
       "name": "Infirmary",
-      "description": "Clean linen is scarce, but the physician keeps it carefully folded. Bitter herbs dry above a locked-looking cupboard."
+      "description": "Narrow beds stand beneath pale windows. The sharp scent of bitter herbs lingers in the air."
     },
     "8": {
       "name": "Workshop",
-      "description": "A cooling forge stains the room red. Scraps of soft iron lie beside a whetstone; a half-finished repair waits for payment."
+      "description": "An anvil stands near the forge. Hammer marks and iron dust cover the stone floor."
     },
     "9": {
       "name": "Courtyard",
@@ -44,11 +44,11 @@
     },
     "10": {
       "name": "Great hall",
-      "description": "Candles light the royal seat, where the aging king prepares his court's new oath. Servants keep their eyes down."
+      "description": "Tall windows overlook a long table. The royal throne commands a clear view of every doorway."
     },
     "11": {
       "name": "Royal chambers",
-      "description": "Heavy curtains keep out the evening. A silver cup sits beside the king’s papers, and the only comfortable chair faces the door."
+      "description": "Heavy curtains keep out the evening. The only comfortable chair faces the door."
     },
     "12": {
       "name": "Gatehouse",
@@ -212,7 +212,7 @@
       "knowledge": [
         "You authored the original memorandum contradicting the court's account.",
         "You told {actor:107:nom} to destroy it and believe she did so.",
-        "My royal key opens the king’s chambers. I may hand it over or accompany someone by opening the door and moving myself. Escort is for moving a captive, not granting permission."
+        "My key opens the king’s chambers. I can lend it to someone or open the door myself and accompany them."
       ],
       "forms": {
         "nom": "Bernard",
@@ -383,6 +383,30 @@
     }
   },
   "items": {
+    "900": {
+      "name": "Guard shift ledger",
+      "description": "Rotations list the dungeon, yard and royal approach. A margin asks that coin payments be recorded beside receipts."
+    },
+    "901": {
+      "name": "Kitchen knife",
+      "description": "A sharp kitchen blade with a sturdy wooden handle."
+    },
+    "902": {
+      "name": "Medical kit",
+      "description": "One treatment of clean dressings and prepared herbs for wounds or poisoning."
+    },
+    "903": {
+      "name": "Bread",
+      "description": "One portion of coarse bread, ready to eat."
+    },
+    "904": {
+      "name": "Candlestick",
+      "description": "A heavy brass candlestick, useful as an improvised blunt weapon."
+    },
+    "905": {
+      "name": "Silver cup",
+      "description": "An empty silver drinking cup with a worn royal crest."
+    },
     "1001": {
       "name": "Brass dungeon key",
       "description": "A worn brass key hangs openly from {actor:102:nom}’s belt."

@@ -37,12 +37,18 @@ pub enum Intent {
     },
     Take {
         item_id: u16,
+        #[serde(default)]
+        quantity: u8,
     },
     Steal {
         item_id: u16,
+        #[serde(default)]
+        quantity: u8,
     },
     Drop {
         item_id: u16,
+        #[serde(default)]
+        quantity: u8,
     },
     Equip {
         item_id: u16,
@@ -50,10 +56,14 @@ pub enum Intent {
     Give {
         item_id: u16,
         target_id: u16,
+        #[serde(default)]
+        quantity: u8,
     },
     Offer {
         item_id: u16,
         target_id: u16,
+        #[serde(default)]
+        quantity: u8,
     },
     Pay {
         target_id: u16,
@@ -135,10 +145,9 @@ impl Intent {
         Ok(intent)
     }
     pub fn check(&self) -> Result<()> {
-        for id in [self.item_id(), self.door_id(), self.target_id()]
-            .into_iter()
-            .flatten()
-        {
+        // Zero is a plan-local reference, never an entity ID. The engine resolves
+        // it only after a successful acquisition in the same active plan.
+        for id in [self.door_id(), self.target_id()].into_iter().flatten() {
             ensure!(id > 0, "Entity IDs must be positive.");
         }
         match self {
@@ -205,9 +214,9 @@ impl Intent {
     }
     pub fn item_id(&self) -> Option<u16> {
         match self {
-            Self::Take { item_id }
-            | Self::Steal { item_id }
-            | Self::Drop { item_id }
+            Self::Take { item_id, .. }
+            | Self::Steal { item_id, .. }
+            | Self::Drop { item_id, .. }
             | Self::Equip { item_id }
             | Self::Give { item_id, .. }
             | Self::Offer { item_id, .. }
@@ -228,6 +237,35 @@ impl Intent {
             | Self::Escort { door_id, .. } => Some(*door_id),
             _ => None,
         }
+    }
+    pub fn quantity(&self) -> Option<u8> {
+        match self {
+            Self::Take { quantity, .. }
+            | Self::Steal { quantity, .. }
+            | Self::Drop { quantity, .. }
+            | Self::Give { quantity, .. }
+            | Self::Offer { quantity, .. } => Some(*quantity),
+            _ => None,
+        }
+    }
+    pub fn resolve_item(&mut self, acquired: u16) -> Result<()> {
+        if self.item_id() != Some(0) {
+            return Ok(());
+        }
+        ensure!(acquired > 0, "No item has been acquired in this plan.");
+        match self {
+            Self::Take { item_id, .. }
+            | Self::Steal { item_id, .. }
+            | Self::Drop { item_id, .. }
+            | Self::Equip { item_id }
+            | Self::Give { item_id, .. }
+            | Self::Offer { item_id, .. }
+            | Self::Eat { item_id }
+            | Self::Drink { item_id }
+            | Self::Use { item_id, .. } => *item_id = acquired,
+            _ => unreachable!(),
+        }
+        Ok(())
     }
     pub fn target_id(&self) -> Option<u16> {
         match self {
@@ -308,6 +346,28 @@ pub enum Volume {
     Whisper,
     Shout,
 }
+
+/// Player speech uses visible emphasis; NPCs choose their own explicit volume.
+pub fn player_speech_volume(text: &str) -> Volume {
+    let text = text.trim_end();
+    if text.ends_with("!!") {
+        return Volume::Shout;
+    }
+    let mut cased = 0u16;
+    for character in text.chars() {
+        if character.is_lowercase() {
+            return Volume::Normal;
+        }
+        if character.is_uppercase() {
+            cased = cased.saturating_add(1);
+        }
+    }
+    if cased >= 2 {
+        Volume::Shout
+    } else {
+        Volume::Normal
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PlotIntent {
@@ -380,8 +440,34 @@ impl Interpretation {
                 "An interpretation cannot invent speech."
             );
         }
+        check_new_plan(&interpretation.plan)?;
         Ok(interpretation)
     }
+}
+pub fn check_new_plan(plan: &[Intent]) -> Result<()> {
+    let mut acquired = false;
+    for intent in plan {
+        ensure!(
+            !matches!(
+                intent,
+                Intent::Guard { .. }
+                    | Intent::Use {
+                        mode: UseMode::Disguise | UseMode::CutBonds,
+                        ..
+                    }
+            ),
+            "Use wait, equip, or release instead of a retired action."
+        );
+        ensure!(
+            intent.item_id() != Some(0) || acquired,
+            "An item reference must follow an acquisition in this plan."
+        );
+        acquired |= matches!(
+            intent,
+            Intent::Take { .. } | Intent::Steal { .. } | Intent::AcceptOffer { .. }
+        );
+    }
+    Ok(())
 }
 
 pub fn check_text(text: &str, maximum: usize) -> Result<()> {
@@ -417,6 +503,7 @@ impl Decision {
         for intent in &decision.plan {
             intent.check()?;
         }
+        check_new_plan(&decision.plan)?;
         // Exact adjacent copies add no distinct words or intention. Keep one;
         // physical actions and differing speeches still go through validation.
         decision
@@ -531,6 +618,8 @@ pub struct Activity {
     pub causes: Vec<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interaction_ends: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_vitals: Option<[f64; 4]>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -582,6 +671,8 @@ pub struct Actor {
     pub summary: String,
     pub activity: Option<Activity>,
     pub plan: Vec<Intent>,
+    #[serde(default)]
+    pub last_acquired_item_id: u16,
     pub accepted_plots: Vec<u16>,
     pub decision_version: u64,
     pub unconscious_until: Option<f64>,
@@ -602,8 +693,26 @@ pub struct ActionOutcome {
     pub ok: bool,
     pub reason: String,
     pub time: f64,
+    #[serde(default)]
+    pub stage: OutcomeStage,
+}
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
+pub enum OutcomeStage {
+    #[default]
+    Legacy,
+    Accepted,
+    Started,
+    Resolved,
+    Failed,
+    Interrupted,
 }
 impl Actor {
+    pub fn clear_plan(&mut self) {
+        self.plan.clear();
+        self.last_acquired_item_id = 0;
+    }
     pub fn invalidate_decision(&mut self) -> Result<()> {
         self.decision_version = self
             .decision_version
@@ -641,6 +750,13 @@ pub enum ItemKind {
     Clothes,
     Rope,
     Document,
+    Object,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+pub enum TextOrigin {
+    Authored(u16),
+    Recipe(Recipe),
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -657,6 +773,8 @@ pub struct Item {
     pub key: Option<String>,
     pub power: f64,
     #[serde(default)]
+    pub text_origin: Option<TextOrigin>,
+    #[serde(default)]
     pub poisoned_by: Option<u16>,
     #[serde(default)]
     pub causes: Vec<u64>,
@@ -668,6 +786,8 @@ pub struct Offer {
     pub from: u16,
     pub to: u16,
     pub item_id: u16,
+    #[serde(default)]
+    pub quantity: u8,
     pub expires: f64,
     pub event_id: u64,
     pub status: String,
@@ -751,6 +871,37 @@ pub struct Memory {
     pub importance: u8,
     pub source_id: Option<u16>,
     pub evidence_ids: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub perceived: Option<PerceivedEvent>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PerceivedEvent {
+    pub room_id: u16,
+    #[serde(flatten)]
+    pub details: EventDetails,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum EventDetails {
+    Speech {
+        speaker_name: Option<String>,
+        recipient_id: Option<u16>,
+        recipient_name: Option<String>,
+        #[serde(default)]
+        recipient_known: bool,
+        volume: Volume,
+    },
+    Entered,
+    Left,
+    Injury,
+    Death,
+    ActivityStarted,
+    ExecutionFeedback,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -759,6 +910,8 @@ pub struct Perception {
     pub room_id: u16,
     pub source_id: Option<u16>,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<EventDetails>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -775,6 +928,8 @@ pub struct WorldEvent {
     pub sound: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub perceptions: Vec<Perception>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<EventDetails>,
 }
 impl WorldEvent {
     pub fn projected(&self, observer: u16) -> Option<Self> {
@@ -786,6 +941,7 @@ impl WorldEvent {
             result.text = perception.text.clone();
             result.room_id = Some(perception.room_id);
             result.actor_id = perception.source_id;
+            result.details = perception.details.clone();
         }
         result.audience = vec![observer];
         result.perceptions.clear();
@@ -937,6 +1093,46 @@ impl Tuning {
 }
 pub fn clamp(n: f64) -> f64 {
     n.clamp(0.0, 100.0)
+}
+pub fn number_text(n: f64) -> String {
+    if n > 0.0 && n < 0.01 {
+        return "<0.01".into();
+    }
+    let text = format!("{n:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+pub fn attack_damage(
+    combat: f64,
+    weapon: f64,
+    hidden: bool,
+    fatigue: f64,
+    target_combat: f64,
+    defending: bool,
+) -> f64 {
+    let base = (8.0 + combat * 0.24 + weapon + if hidden { 18.0 } else { 0.0 }
+        - fatigue * 0.06
+        - target_combat * 0.1)
+        .round()
+        .max(4.0);
+    if defending { base / 2.0 } else { base }
+}
+pub fn subdued_health(health: f64, damage: f64) -> f64 {
+    (health - damage).max(10.0).min(health)
+}
+pub fn theft_chance(
+    stealth: f64,
+    hidden: bool,
+    owner_stealth: f64,
+    owner_combat: f64,
+    owner_fatigue: f64,
+) -> f64 {
+    (0.45
+        + (stealth - owner_stealth - owner_combat / 3.0 + owner_fatigue / 2.0) / 120.0
+        + if hidden { 0.25 } else { 0.0 })
+    .clamp(0.08, 0.9)
+}
+pub fn lockpick_chance(craft: f64, stealth: f64, royal: bool) -> f64 {
+    (0.3 + craft / 150.0 + stealth / 300.0 - if royal { 0.3 } else { 0.0 }).clamp(0.1, 0.9)
 }
 pub fn clock_text(time: f64, language: &str) -> String {
     let seconds = time.floor() as u64;

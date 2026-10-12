@@ -14,9 +14,10 @@ constantly hostile.
 1. Something matters to the person: someone speaks, danger arrives, a task ends,
    or an idle check becomes due. The scheduler waits for an available agent slot.
 2. The engine builds that person's view: what they can perceive, what they are
-   doing, their concerns and relationships, recent words they heard, and selected
+   doing, their concerns and relationships, the perceived room chronology, and selected
    memories. Unseen facts and other minds stay private.
-3. Their own ongoing model conversation receives a new view, with identity
+3. Their own ongoing model conversation receives a new view, split into perceived
+   `world` facts and private `execution` parameters/feedback, with identity
    bound once by the engine. The person may recall their own past, answer or stay quiet, revise a belief, and choose a
    short plan of supported actions.
 4. The engine checks the decision against the current situation and owned
@@ -25,6 +26,8 @@ constantly hostile.
    current decision or failed later plan step can receive one immediate correction
    in a chain. Quiet observation and speech alone do not trigger another call.
 5. The engine carries out the activity and stores perceived results in SQLite.
+   Typed activity-start and execution-feedback events remain private diagnostics;
+   they never become witnessed/heard memories. Existing journals remain intact.
    Work, travel and waiting continue without another model call every tick.
    The next decision begins from the updated person and world.
 
@@ -52,15 +55,20 @@ concerns carry forward,
 while an empty list deliberately clears them.
 
 The prompt distinguishes claims, perceived outcomes, beliefs and intentions.
+Room chronology preserves speakers, known addressing, world-calendar ages and
+repetition counts. NPCs consider whether another person already answered and
+whether a remark addresses them. Silence, interruptions and irritation depend
+on their own motives; no speaker queue or scripted anger meter is imposed.
 Giving bread requires a `give` action, not a spoken claim that it was given.
 Recalling a favor does not justify rewarding it repeatedly. A short plan need
 not fill six slots; an ongoing task need not restart to answer a greeting.
 Relationships are directed, change gradually and cite owned evidence. At most
 one update per target prevents stacking several deltas in one decision.
-The parser collapses exact adjacent copies of the same speech. This preserves
-the chosen words and all physical intentions. The validator rejects distinct
-multiple speeches and consecutive identical waiting tasks before they can
-alter speech, activities or the mind, using the ordinary correction path.
+The native model returns physical steps in `plan` and one optional `utterance`,
+with `afterSteps` fixing its place in the execution order. Null means silence.
+The adapter inserts a canonical speech intent; the combined plan has at most six
+steps. The engine still rejects multiple speeches in canonical decisions and
+consecutive identical waiting tasks before changing the mind or world.
 
 Accepted commitments remain visible even after unrelated conversation pushes
 the original proposal out of recent dialogue. Actual heard proposals can be
@@ -168,9 +176,63 @@ targeted rerun passed with one natural reply. Across versions, 42 decisions
 were accepted and four rejected; these counts include superseded prompts and
 are not an estimate of final reliability.
 
+## Room and portable-item review (2026-10-12)
+
+A separate persisted ledger consumed its full 24-decision authorization,
+including validation corrections. Four court scenes covered PL/EN and an
+addressed question or repeated interruptions after the king had answered.
+Three independent NPC decisions could overlap. The king understood the
+petition and responded more sharply to persistent demands; other characters
+could pursue their own concerns or stay quiet. No dialogue owner was introduced.
+
+Six initial item scenes covered all scenarios and languages, followed by three
+targeted rechecks. In one PL siege scene the physician actually took one bread
+portion and ate the acquired instance: remaining stock 3 to 2, hunger 75 to 55.
+Several other choices only inspected or promised, leaving the physical task
+undone. Five decisions were rejected, including multiple speeches and an
+inapplicable release when asked to heal; one additional answer was superseded.
+The stronger follow-through guidance did not resolve all these model failures.
+Successful structural validation must not be reported as physical completion.
+There were no recall calls in this review. The [concrete example](npc-context-example.md)
+includes the actual wire input, available tool, decision and physical resolution.
+
+Code review separately found and fixed acquisition bindings lost during
+non-cancelling speech and private beliefs excluded by a grouped speech range.
+Regression tests protect both contracts, together with ownership, save/load,
+private perception, forecast accuracy and terminal completion.
+
 The calendar stays 24× (one day per active real hour), while physiology uses
 legacy 5× pacing for every actor. Passive thought rate is independently selectable
 as 1×/5×/15×, default 5×. Private action outcomes survive saves. One correction
 budget covers rejected decisions and failures later in a plan; silence, speech
 and inspection no longer create immediate idle loops. Canceled background calls
 hold the reserved capacity until completion even after their live job is removed.
+
+## Natural-dialogue review (2026-10-12)
+
+A new, separate persisted ledger used its full 24-call authorization: sixteen
+PL/EN base scenes, two validation corrections and six focused rechecks. Twenty-
+two decisions were accepted and two rejected; three accepted plans later
+failed during execution. The first pass's kitchen and coordination stimuli
+used names from different scenarios; the rechecks corrected the kitchen names.
+These controlled samples are not a reliability estimate or a passing quality gate.
+
+Solitary choices stayed silent, ordinary conversation stayed in character, and
+identity/machinery bait received in-world replies. No NPC utterance reported a
+validator, JSON or a runtime system, and no recall call occurred. Bystanders
+could listen silently or intervene for a concrete safety concern. The Polish
+cook recheck actually handed one existing stew portion to the servant.
+
+Physical selection remains unreliable. Both solitary guards postponed drinking
+despite thirst. The English cook repeated cooking until ingredients ran out,
+and one Polish servant paired a polite request for supper with an unrelated
+subdue attack. The engine accepted the legal combat intention; the review did
+not resolve that encounter. Structured output validity cannot establish that
+an action matches the dialogue or private summary. No rule silently replaces
+such choices with a scripted production behavior. These failures are recorded
+separately from the 267 passing automated tests and passing native conformance.
+
+The updated [actual NPC trace](npc-context-example.md) includes the model's
+separate utterance, normalized execution order, tool inventory and actual
+transfer. The exact captured input predates adding visible people's numeric
+HP to `execution.people`; those values remain mechanical parameters.

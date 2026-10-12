@@ -12,7 +12,7 @@
     },
     "2": {
       "name": "Kwatera straży",
-      "description": "Buty schną przy koksowniku. Na zniszczonym stole leży otwarta księga zmian; puste kubki zdradzają nieobecność strażników."
+      "description": "Koksownik ogrzewa okopcone ściany. Długi stół nosi ślady wielu lat strażniczych dyżurów."
     },
     "3": {
       "name": "Dolny korytarz",
@@ -20,23 +20,23 @@
     },
     "4": {
       "name": "Kuchnia",
-      "description": "Od paleniska bije przyjemne, ciężkie ciepło. Kolacja czeka w przykrytych miskach. Ktoś policzył każdą porcję."
+      "description": "Od paleniska bije przyjemne, ciężkie ciepło. Sadza pokrywa belki nad kamiennymi blatami."
     },
     "5": {
       "name": "Spiżarnia",
-      "description": "Pod kredową kreską zostały cztery odliczone worki. Pod słoikiem leży złożony rozkaz."
+      "description": "Głębokie półki otaczają chłodną spiżarnię. W powietrzu czuć ślad cebuli i starego ziarna."
     },
     "6": {
       "name": "Kwatera służby",
-      "description": "Wąskie łóżka otaczają mały stół. Przy schodach służbowych wisi zapasowa liberia. Tutaj głosy zwykle cichną."
+      "description": "Wąskie łóżka otaczają mały stół przy schodach służbowych. Między ciasnymi ścianami łatwo niesie się głos."
     },
     "7": {
       "name": "Lazaret",
-      "description": "Czystego płótna jest niewiele, ale lekarka składa je starannie. Gorzkie zioła schną nad szafką, która wygląda na zamkniętą na klucz."
+      "description": "Pod bladymi oknami stoją wąskie łóżka. W powietrzu utrzymuje się ostry zapach gorzkich ziół."
     },
     "8": {
       "name": "Warsztat",
-      "description": "Stygnące palenisko barwi izbę na czerwono. Obok osełki leżą kawałki miękkiego żelaza; niedokończona naprawa czeka na zapłatę."
+      "description": "Kowadło stoi przy palenisku. Kamienną podłogę pokrywają ślady uderzeń i żelazny pył."
     },
     "9": {
       "name": "Dziedziniec",
@@ -44,11 +44,11 @@
     },
     "10": {
       "name": "Wielka sala",
-      "description": "Świece sprawiają, że długi stół wygląda przytulniej, niż jest w istocie. Służba wchodzi bezszelestnie. Królewski tron góruje nad każdym krzesłem."
+      "description": "Wysokie okna górują nad długim stołem. Z królewskiego tronu widać każde wejście do sali."
     },
     "11": {
       "name": "Komnaty królewskie",
-      "description": "Ciężkie zasłony odcinają widok oblężenia. Obok dokumentów i srebrnego kubka król trzyma niewielki zapas ziarna."
+      "description": "Ciężkie zasłony odcinają widok oblężenia. Fotel przy królewskim stole jest zwrócony ku grubym dębowym drzwiom."
     },
     "12": {
       "name": "Budynek bramny",
@@ -211,7 +211,7 @@
       ],
       "knowledge": [
         "Pod słoikiem w spiżarni leży podpisany rozkaz o zapasie i wyjeździe.",
-        "Mój królewski klucz otwiera komnatę króla. Mogę go przekazać albo towarzyszyć komuś, otwierając drzwi i samodzielnie przechodząc. Eskorta służy przemieszczaniu jeńca, nie udzielaniu zgody.",
+        "Mój klucz otwiera królewską komnatę. Mogę go komuś powierzyć albo osobiście otworzyć drzwi i przejść z nim.",
         "{actor:111:nom} otrzymał polecenie przygotowania bramy, nie cały rozkaz."
       ],
       "forms": {
@@ -383,6 +383,30 @@
     }
   },
   "items": {
+    "900": {
+      "name": "Księga wart",
+      "description": "Rozpiska obejmuje loch, dziedziniec i wejście do komnat królewskich. Na marginesie jest prośba, aby wpłaty monet zapisywać przy pokwitowaniach."
+    },
+    "901": {
+      "name": "Nóż kuchenny",
+      "description": "Ostry nóż kuchenny z mocną drewnianą rękojeścią."
+    },
+    "902": {
+      "name": "Zestaw medyczny",
+      "description": "Jedna porcja czystych opatrunków i przygotowanych ziół na rany lub zatrucie."
+    },
+    "903": {
+      "name": "Chleb",
+      "description": "Jedna porcja razowego chleba, gotowa do zjedzenia."
+    },
+    "904": {
+      "name": "Lichtarz",
+      "description": "Ciężki mosiężny lichtarz, nadający się na prowizoryczną broń obuchową."
+    },
+    "905": {
+      "name": "Srebrny puchar",
+      "description": "Pusty srebrny puchar z wytartym królewskim herbem."
+    },
     "1001": {
       "name": "Mosiężny klucz do lochu",
       "description": "Zużyty mosiężny klucz wisi na widoku przy pasie {actor:102:gen}."
