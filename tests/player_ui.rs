@@ -372,7 +372,7 @@ fn command_picker_wraps_upward_and_downward() {
 }
 
 #[test]
-fn dotted_title_fits_cell_bounds_and_matches_readme() {
+fn dotted_title_fits_cell_bounds() {
     let full = ui::title(120, 24, true);
     assert!(
         full.iter()
@@ -384,14 +384,6 @@ fn dotted_title_fits_cell_bounds_and_matches_readme() {
             .flat_map(|row| row.chars())
             .all(|ch| ch == ' ' || ('\u{2800}'..='\u{28ff}').contains(&ch))
     );
-    let readme = include_str!("../README.md");
-    let banner = readme
-        .strip_prefix("```text\n")
-        .unwrap()
-        .split_once("\n```\n")
-        .unwrap()
-        .0;
-    assert_eq!(full.join("\n"), banner);
     for width in [0, 1, 4, 9, 20, 24, 28, 40, 68, 80, 120] {
         for rows in [0, 1, 2, 3, 4, 8, 12, 24] {
             for braille in [false, true] {

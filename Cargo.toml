@@ -1,9 +1,9 @@
 [package]
 name = "below-the-crown"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.99"
-description = "A living castle, played through a terminal on your LAN"
+description = "A ruthless medieval social sandbox with LLM-driven characters and local multiplayer"
 license = "MIT"
 repository = "https://github.com/KacperSzw/BelowTheCrown"
 default-run = "below-the-crown"

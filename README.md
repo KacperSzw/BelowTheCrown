@@ -1,21 +1,26 @@
-```text
-⣿⠛⠛⡄ ⣿⠛⠛⠃ ⣿    ⣤⠛⠛⡄ ⣿  ⡇   ⠛⢻⡟⠃ ⣿  ⡇ ⣿⠛⠛⠃   ⣤⠛⠛⠃ ⣿⠛⠛⡄ ⣤⠛⠛⡄ ⣿  ⡇ ⣿⡄ ⡇
-⣿⣤⣤⠃ ⣿⣤⣤  ⣿    ⣿  ⡇ ⣿⢠⡄⡇    ⢸⡇  ⣿⣤⣤⡇ ⣿⣤⣤    ⣿    ⣿⣤⣤⠃ ⣿  ⡇ ⣿⢠⡄⡇ ⣿⢣⡄⡇
-⣿  ⡇ ⣿    ⣿    ⣿  ⡇ ⣿⢸⡇⡇    ⢸⡇  ⣿  ⡇ ⣿      ⣿    ⣿⠘⢣  ⣿  ⡇ ⣿⢸⡇⡇ ⣿ ⢸⡇
-⠛⠛⠛  ⠛⠛⠛⠃ ⠛⠛⠛⠃  ⠛⠛   ⠃⠘     ⠘⠃  ⠛  ⠃ ⠛⠛⠛⠃    ⠛⠛⠃ ⠛  ⠃  ⠛⠛   ⠃⠘  ⠛  ⠃
-```
-
 # Below the Crown
 
-A living castle in your terminal. Escape the dungeon. Bring down the king.
-Everyone has their own motives. Anyone you meet could be another player.
+**A ruthless medieval world, alive in your terminal.**
+
+[![A first encounter in the dungeon](docs/images/gameplay.png)](docs/images/gameplay.png)
+
+Escape the dungeon. Bargain, deceive, and turn rival loyalties to your advantage.
+LLM-driven characters have their own memories, motives, and loyalties—and decide
+what to say and do as the world unfolds.
+
+Play solo or share the same castle with friends over LAN. Join from any computer
+with SSH; only the host needs the game and a logged-in Codex CLI.
+
+[![Talking with the dungeon guard](docs/images/dialogue.png)](docs/images/dialogue.png)
+
+[![Two players sharing the same castle](docs/images/multiplayer.png)](docs/images/multiplayer.png)
 
 ## Host
 
 Linux x64 or ARM64. Install [Codex CLI](https://developers.openai.com/codex/cli/)
 and run `codex login`.
 
-Download your binary from [Releases](https://github.com/KacperSzw/BelowTheCrown/releases).
+Download your binary from the [latest release](https://github.com/KacperSzw/BelowTheCrown/releases/latest).
 Rename it to `below-the-crown`, then:
 
 ```sh

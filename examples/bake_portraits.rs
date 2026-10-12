@@ -132,6 +132,24 @@ fn main() -> Result<()> {
         for (name, width, height) in [("compact", 11, 5), ("standard", 15, 7), ("detailed", 21, 9)]
         {
             let size = format!("{width}x{height}");
+            // Match the 1:2 terminal-cell aspect without widening a narrow head.
+            let pixels = format!("{}x{}", width * 8, height * 16);
+            let fitted = run(
+                "magick",
+                &[
+                    "png:-".into(),
+                    "-resize".into(),
+                    pixels.clone(),
+                    "-background".into(),
+                    "black".into(),
+                    "-gravity".into(),
+                    "center".into(),
+                    "-extent".into(),
+                    pixels,
+                    "png:-".into(),
+                ],
+                Some(&png),
+            )?;
             let args = [
                 "--format",
                 "symbols",
@@ -166,7 +184,7 @@ fn main() -> Result<()> {
                 "off",
                 "-",
             ];
-            let output = String::from_utf8(run("chafa", &args.map(str::to_owned), Some(&png))?)?;
+            let output = String::from_utf8(run("chafa", &args.map(str::to_owned), Some(&fitted))?)?;
             let mut rows: Vec<String> = output
                 .replace("\r\n", "\n")
                 .split_terminator('\n')
