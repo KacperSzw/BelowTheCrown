@@ -7,7 +7,30 @@ pub const PLAYER: u16 = 101;
 pub const KING: u16 = 103;
 pub const DUNGEON: u16 = 1;
 pub const MODEL: &str = "gpt-6-luna";
-pub const EFFORT: &str = "high";
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+#[repr(u8)]
+pub enum ReasoningEffort {
+    Low,
+    Medium,
+    #[default]
+    High,
+    Xhigh,
+    Max,
+}
+impl ReasoningEffort {
+    pub const ALL: [Self; 5] = [Self::Low, Self::Medium, Self::High, Self::Xhigh, Self::Max];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
+}
 pub const CLOCK_RATE: f64 = 24.0;
 pub const PHYSIOLOGY_RATE: f64 = 5.0;
 pub const NOTEBOOK_MAX_CHARS: usize = 1200;

@@ -25,13 +25,20 @@ Rename it to `below-the-crown`, then:
 
 ```sh
 chmod +x below-the-crown
-./below-the-crown host
+./below-the-crown
 ```
 
-Pick a scenario, English or Polish, your LAN interface, and the maximum number
-of agents running at once (default 5), and passive NPC thinking rate (1×/5×/15×,
-default 5×). A day lasts one active real hour at every thinking rate. The manager displays an SSH command for
-everyone on that LAN. The agent limit can also be changed in manager Settings.
+Select **Play** to start or join the local game and open a player window.
+The host menu stays open for **Settings**, **Saves**, **Diagnostics**, and **Admin**.
+Without a supported desktop terminal, Play shows the command to run in another
+terminal. Startup problems stay in the menu with a suggested fix.
+
+Settings chooses the scenario, English or Polish, LAN interface, Luna reasoning
+effort (default high), simultaneous agent limit (default 5), and passive NPC
+thinking rate (1×/5×/15×, default 5×). The same settings remain available during
+play; effort changes affect subsequent decisions without resetting NPC minds.
+A day lasts one active real hour at every thinking rate. The host menu displays
+an SSH command for everyone on the selected LAN.
 
 ## Play
 
@@ -42,7 +49,9 @@ ssh -p 2222 192.168.100.25
 ```
 
 Use the address shown by your host. No account, password or game installation
-is needed. The host can join with `ssh -p 2222 127.0.0.1`.
+is needed. On the host, choose **Play** to open your player window. If a separate
+window is unavailable, **Diagnostics** shows the local join command with the
+game's own host-key file.
 
 Choose your name. Write to speak in your room; `/` shows actions.
 Use CAPS or end with `!!` to shout to neighbouring rooms. `/auto on` interprets your speech as actions.

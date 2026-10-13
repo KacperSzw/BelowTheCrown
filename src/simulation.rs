@@ -5,9 +5,9 @@ use crate::{
     },
     content::WorldContent,
     engine::Engine,
-    model::{EFFORT, MODEL, Wake, WakeCause, WakePriority},
-    paths::write_private,
-    runtime::{GameHandle, HostInfo, PlayerConnection, RuntimeRequest},
+    model::{MODEL, ReasoningEffort, Wake, WakeCause, WakePriority},
+    runtime::{GameHandle, HostInfo, PlayerConnection, Reply, RuntimeRequest},
+    settings::HostSettings,
 };
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
@@ -17,6 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{mpsc, watch};
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug)]
@@ -29,10 +30,11 @@ pub struct Scheduling {
 }
 impl Default for Scheduling {
     fn default() -> Self {
+        let settings = HostSettings::default();
         Self {
-            maximum_calls: 5,
-            npc_update_rate: 5,
-            background_interval: 60.,
+            maximum_calls: usize::from(settings.max_agents),
+            npc_update_rate: settings.npc_update_rate,
+            background_interval: 300. / f64::from(settings.npc_update_rate),
             aging: 30.,
             timeout: Duration::from_secs(120),
         }
@@ -40,10 +42,7 @@ impl Default for Scheduling {
 }
 impl Scheduling {
     pub fn set_npc_update_rate(&mut self, rate: u8) -> Result<()> {
-        ensure!(
-            matches!(rate, 1 | 5 | 15),
-            "NPC update rate must be 1, 5 or 15"
-        );
+        HostSettings::validate_npc_update_rate(rate)?;
         self.npc_update_rate = rate;
         self.background_interval = 300. / f64::from(rate);
         Ok(())
@@ -95,6 +94,11 @@ struct Completion {
     duration_ms: f64,
     generation: u64,
 }
+struct DiagnosticResult {
+    generation: u64,
+    result: Result<(Value, Vec<ReasoningEffort>)>,
+    reply: Reply,
+}
 #[derive(Clone, Copy, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Timing {
@@ -130,6 +134,7 @@ struct Status {
 
 pub struct Simulation {
     pub engine: Engine,
+    pub host_settings: HostSettings,
     handle: GameHandle,
     manager: watch::Sender<Value>,
     requests: mpsc::Receiver<RuntimeRequest>,
@@ -139,7 +144,9 @@ pub struct Simulation {
     done_sender: mpsc::Sender<Completion>,
     pub scheduling: Scheduling,
     driver: Arc<dyn DecisionDriver>,
+    supported_efforts: Vec<ReasoningEffort>,
     production: Option<WorkerOptions>,
+    diagnostics: JoinSet<DiagnosticResult>,
     connected: BTreeMap<u16, watch::Sender<Value>>,
     sessions: HashMap<u16, u64>,
     queued: BTreeMap<u16, Queued>,
@@ -156,8 +163,6 @@ pub struct Simulation {
     last_idle: f64,
     observing: bool,
     selected: Option<u16>,
-    pending_language: String,
-    pending_scenario: String,
     error: Option<String>,
     stopped: bool,
     latencies: VecDeque<(bool, Timing)>,
@@ -167,24 +172,16 @@ impl Simulation {
     pub fn production(
         engine: Engine,
         info: HostInfo,
-        options: WorkerOptions,
-    ) -> Result<(Self, GameHandle)> {
-        let (recall_sender, recall_requests) = mpsc::channel(64);
-        let driver = Arc::new(CodexDriver::from_content(
-            info.data_dir.clone(),
-            engine.content.clone(),
-            &engine.language,
-            options.clone(),
-            recall_sender.clone(),
-        ));
-        Ok(Self::construct(
+        worker: crate::diagnostics::PreparedWorker,
+    ) -> (Self, GameHandle) {
+        Self::construct(
             engine,
             info,
-            driver,
-            Some(options),
-            recall_sender,
-            recall_requests,
-        ))
+            worker.driver,
+            Some(worker.options),
+            worker.recall_sender,
+            worker.recall_requests,
+        )
     }
     pub fn with_driver(
         engine: Engine,
@@ -214,8 +211,16 @@ impl Simulation {
         let scenario = engine.world.scenario_id.clone();
         let initialization_error = engine.initialize_minds().err().map(safe_error);
         let last_idle = engine.world.interaction_time;
+        let supported_efforts = driver.supported_efforts();
         let mut simulation = Self {
             engine,
+            host_settings: HostSettings {
+                language,
+                scenario,
+                max_players: u8::try_from(handle.info.maximum_players)
+                    .expect("validated player limit"),
+                ..HostSettings::default()
+            },
             handle: handle.clone(),
             manager,
             requests,
@@ -225,7 +230,9 @@ impl Simulation {
             done_sender,
             scheduling: Scheduling::default(),
             driver,
+            supported_efforts,
             production,
+            diagnostics: JoinSet::new(),
             connected: BTreeMap::new(),
             sessions: HashMap::new(),
             queued: BTreeMap::new(),
@@ -242,8 +249,6 @@ impl Simulation {
             last_idle,
             observing: false,
             selected: Some(102),
-            pending_language: language,
-            pending_scenario: scenario,
             error: None,
             stopped: false,
             latencies: VecDeque::new(),
@@ -264,8 +269,76 @@ impl Simulation {
             && self.engine.world.ending == "playing"
             && (!self.connected.is_empty() || self.observing)
     }
-    pub async fn preflight(&self) -> Result<Value> {
-        self.driver.inspect().await
+    fn begin_diagnostics(&mut self, params: Value, reply: Reply) {
+        if reply.is_closed() {
+            return;
+        }
+        let validation = ensure_keys(&params, &[]).and_then(|()| {
+            ensure!(
+                self.diagnostics.is_empty(),
+                "Diagnostics are already running"
+            );
+            Ok(())
+        });
+        if let Err(error) = validation {
+            let _ = reply.send(Err(error));
+            return;
+        }
+        let driver = self.driver.clone();
+        let options = self.production.clone();
+        let directory = self.handle.info.data_dir.clone();
+        let effort = self.host_settings.reasoning_effort;
+        let generation = self.context_generation;
+        self.diagnostics.spawn(async move {
+            let result = async {
+                let report = if let Some(options) = options {
+                    crate::diagnostics::check(&directory, &options, driver.as_ref(), effort).await?
+                } else {
+                    driver.inspect().await?
+                };
+                Ok((report, driver.supported_efforts()))
+            }
+            .await;
+            DiagnosticResult {
+                generation,
+                result,
+                reply,
+            }
+        });
+    }
+    fn finish_diagnostics(&mut self, completed: DiagnosticResult) {
+        let result = completed.result.and_then(|(mut report, efforts)| {
+            ensure!(
+                completed.generation == self.context_generation,
+                "The castle changed during Diagnostics. Retry the check."
+            );
+            self.supported_efforts = efforts;
+            report["supportedEfforts"] = json!(self.supported_efforts);
+            report["effort"] = json!(self.host_settings.reasoning_effort);
+            report["effortSupported"] = json!(
+                self.supported_efforts
+                    .contains(&self.host_settings.reasoning_effort)
+            );
+            self.publish()?;
+            Ok(report)
+        });
+        let _ = completed.reply.send(result);
+    }
+    async fn cancel_diagnostics(&mut self) {
+        self.diagnostics.abort_all();
+        while self.diagnostics.join_next().await.is_some() {}
+    }
+    pub fn apply_host_settings(&mut self, settings: HostSettings) -> Result<()> {
+        settings.validate()?;
+        self.scheduling.maximum_calls = usize::from(settings.max_agents);
+        if settings.npc_update_rate != self.scheduling.npc_update_rate {
+            self.scheduling
+                .set_npc_update_rate(settings.npc_update_rate)?;
+            self.last_idle = self.engine.world.interaction_time;
+        }
+        self.host_settings = settings;
+        self.publish()?;
+        Ok(())
     }
     fn visit(&self, actor: u16) -> String {
         format!(
@@ -530,6 +603,7 @@ impl Simulation {
             branch: self.engine.world.branch.clone(),
             input,
             listener: false,
+            reasoning_effort: self.host_settings.reasoning_effort,
             identity: Some(self.engine.npc_identity(actor)?),
             token: DecisionToken {
                 job_id: id,
@@ -574,6 +648,7 @@ impl Simulation {
             actor_id: actor,
             branch: message.branch.clone(),
             listener: true,
+            reasoning_effort: self.host_settings.reasoning_effort,
             identity: None,
             token: DecisionToken {
                 job_id: id,
@@ -998,7 +1073,7 @@ impl Simulation {
                 "observe" => &["enabled"],
                 "save" | "load" => &["name"],
                 "select" => &["actorId"],
-                "settings" => &["language", "scenario", "maxAgents", "npcUpdateRate"],
+                "settings" => &HostSettings::FIELDS,
                 "new" => &["seed"],
                 _ => bail!("Unknown manager operation"),
             },
@@ -1032,56 +1107,26 @@ impl Simulation {
                 self.selected = Some(id);
             }
             "settings" => {
-                let language = optional_text(&params, "language")?
-                    .unwrap_or(&self.pending_language)
-                    .to_owned();
+                // Preserve persisted network selection while running listeners retain their binding.
+                let current = &self.host_settings;
+                let mut overrides = json!({"language":current.language,"scenario":current.scenario,"maxPlayers":current.max_players,"maxAgents":current.max_agents,"npcUpdateRate":current.npc_update_rate,"reasoningEffort":current.reasoning_effort});
+                overrides
+                    .as_object_mut()
+                    .expect("settings object")
+                    .extend(params.as_object().expect("validated parameters").clone());
+                let settings =
+                    HostSettings::load_with_overrides(&self.handle.info.data_dir, &overrides)?;
                 ensure!(
-                    matches!(language.as_str(), "en" | "pl"),
-                    "Choose English or Polish"
+                    !self.supported_efforts.is_empty(),
+                    "Run Diagnostics to discover Luna reasoning efforts"
                 );
-                let scenario = optional_text(&params, "scenario")?
-                    .unwrap_or(&self.pending_scenario)
-                    .to_owned();
-                WorldContent::load(&scenario)?;
-                let maximum = match params.get("maxAgents") {
-                    Some(value) => value
-                        .as_u64()
-                        .filter(|n| (1..=32).contains(n))
-                        .ok_or_else(|| anyhow::anyhow!("Maximum agents must be between 1 and 32"))?
-                        as usize,
-                    None => self.scheduling.maximum_calls,
-                };
-                let npc_rate = match params.get("npcUpdateRate") {
-                    Some(value) => value
-                        .as_u64()
-                        .filter(|n| matches!(n, 1 | 5 | 15))
-                        .context("NPC update rate must be 1, 5 or 15")?
-                        as u8,
-                    None => self.scheduling.npc_update_rate,
-                };
-                let path = self.handle.info.data_dir.join("server-settings.json");
-                let mut settings = match std::fs::read(&path) {
-                    Ok(bytes) => {
-                        ensure!(bytes.len() <= 65536, "Server settings are too large");
-                        let value: Value = serde_json::from_slice(&bytes)?;
-                        ensure!(value.is_object(), "Invalid server settings");
-                        value
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => json!({}),
-                    Err(error) => return Err(error.into()),
-                };
-                settings["language"] = json!(language);
-                settings["scenario"] = json!(scenario);
-                settings["maxAgents"] = json!(maximum);
-                settings["npcUpdateRate"] = json!(npc_rate);
-                write_private(&path, &serde_json::to_vec(&settings)?, false)?;
-                self.pending_language = language;
-                self.pending_scenario = scenario;
-                self.scheduling.maximum_calls = maximum;
-                if npc_rate != self.scheduling.npc_update_rate {
-                    self.scheduling.set_npc_update_rate(npc_rate)?;
-                    self.last_idle = self.engine.world.interaction_time;
-                }
+                ensure!(
+                    self.supported_efforts.contains(&settings.reasoning_effort),
+                    "Luna does not support {} reasoning with the current model descriptor",
+                    settings.reasoning_effort.as_str()
+                );
+                settings.save(&self.handle.info.data_dir)?;
+                self.apply_host_settings(settings)?;
                 self.pump()?;
             }
             "load" | "new" => {
@@ -1096,7 +1141,7 @@ impl Simulation {
                     } else {
                         "before-restore"
                     })?;
-                    self.engine.load(name, &self.pending_language)?;
+                    self.engine.load(name, &self.host_settings.language)?;
                 } else {
                     let seed = match params.get("seed") {
                         Some(value) => u32::try_from(value.as_u64().ok_or_else(|| {
@@ -1104,12 +1149,15 @@ impl Simulation {
                         })?)?,
                         None => crate::manager::seed(),
                     };
-                    WorldContent::load(&self.pending_scenario)?;
+                    WorldContent::load(&self.host_settings.scenario)?;
                     self.engine.save("before-retry")?;
-                    self.engine
-                        .new_run(&self.pending_scenario, &self.pending_language, seed)?;
+                    self.engine.new_run(
+                        &self.host_settings.scenario,
+                        &self.host_settings.language,
+                        seed,
+                    )?;
                 }
-                self.replace_context().await?;
+                self.refresh_context().await?;
             }
             "recover" => {
                 self.context_generation = self
@@ -1117,6 +1165,7 @@ impl Simulation {
                     .checked_add(1)
                     .context("Decision generation exhausted")?;
                 self.cancel_all();
+                self.cancel_diagnostics().await;
                 self.error = None;
                 self.driver.reset().await;
                 self.engine.initialize_minds()?;
@@ -1137,13 +1186,14 @@ impl Simulation {
         }
         Ok(json!({"ok":true}))
     }
-    async fn replace_context(&mut self) -> Result<()> {
+    async fn refresh_context(&mut self) -> Result<()> {
         self.last_idle = self.engine.world.interaction_time;
         self.context_generation = self
             .context_generation
             .checked_add(1)
             .context("Decision generation exhausted")?;
         self.cancel_all();
+        self.cancel_diagnostics().await;
         self.driver.reset().await;
         for (_, sender) in std::mem::take(&mut self.connected) {
             sender.send_replace(
@@ -1197,15 +1247,29 @@ impl Simulation {
         let mut view = self.engine.manager_view(self.selected)?;
         view["paused"] = json!(self.paused());
         view["model"] = json!(MODEL);
-        view["effort"] = json!(EFFORT);
+        view["effort"] = json!(self.host_settings.reasoning_effort);
+        view["settings"] = serde_json::to_value(&self.host_settings)?;
+        view["supportedEfforts"] = json!(self.supported_efforts);
+        view["version"] = json!(env!("CARGO_PKG_VERSION"));
         view["error"] = json!(self.error);
-        view["pendingLanguage"] = json!(self.pending_language);
-        view["pendingScenario"] = json!(self.pending_scenario);
+        view["pendingLanguage"] = json!(self.host_settings.language);
+        view["pendingScenario"] = json!(self.host_settings.scenario);
         view["maxAgents"] = json!(self.scheduling.maximum_calls);
         view["npcUpdateRate"] = json!(self.scheduling.npc_update_rate);
         view["manualPause"] = json!(self.engine.world.manual_pause);
         view["observing"] = json!(self.observing);
-        view["ssh"] = json!({"host":self.handle.info.address,"port":self.handle.info.port,"command":format!("ssh -p {} {}",self.handle.info.port,self.handle.info.address),"localCommand":format!("ssh -p {} 127.0.0.1",self.handle.info.port)});
+        let local_command = if self.handle.info.port == 0 {
+            None
+        } else {
+            Some(
+                crate::player::LocalConnection::new(
+                    &self.handle.info.data_dir,
+                    self.handle.info.port,
+                )?
+                .command()?,
+            )
+        };
+        view["ssh"] = json!({"host":self.handle.info.address,"port":self.handle.info.port,"command":format!("ssh -p {} {}",self.handle.info.port,self.handle.info.address),"localCommand":local_command});
         if let Some(actors) = view["actors"].as_array_mut() {
             for actor in actors {
                 let id = actor["id"].as_u64().unwrap_or(0) as u16;
@@ -1339,15 +1403,21 @@ impl Simulation {
                         RuntimeRequest::Join{identity,name,reply}=>{if !reply.is_closed(){let result=self.join(identity,name);if let Err(Ok(player))=reply.send(result)&&self.sessions.get(&player.actor_id)==Some(&player.session_id){self.disconnect(player.actor_id)?;}}},
                         RuntimeRequest::Player{actor_id,session_id,method,params,reply}=>{let answer=if self.sessions.get(&actor_id)==Some(&session_id){self.player_request(actor_id,&method,params)}else{Err(anyhow::anyhow!("This player connection belongs to an earlier session"))};let _=reply.send(answer);},
                         RuntimeRequest::Disconnect{actor_id,session_id}=>{if self.sessions.get(&actor_id)==Some(&session_id){self.disconnect(actor_id)?;}},
-                        RuntimeRequest::Manager{method,params,reply}=>{let answer=self.manager_request(&method,params).await;let _=reply.send(answer);if changes_clock{last=Instant::now();}},
+                        RuntimeRequest::Manager{method,params,reply}=>{
+                            if method=="diagnostics" {self.begin_diagnostics(params,reply);}
+                            else {let answer=self.manager_request(&method,params).await;let _=reply.send(answer);}
+                            if changes_clock{last=Instant::now();}
+                        },
                     }
                     if let Err(error)=self.pump(){self.error=Some(safe_error(error));self.engine.set_pause(true)?;}self.publish()?;
                 }
                 Some(request)=self.recall_requests.recv()=>{let answer=self.recall_for_job(&request);let _=request.reply.send(answer);},
+                Some(completed)=self.diagnostics.join_next(),if !self.diagnostics.is_empty()=>{if let Ok(completed)=completed{self.finish_diagnostics(completed);}},
                 Some(completion)=self.done.recv()=>{self.retire_slot(&completion);if self.can_run(){if let Err(error)=self.accept(completion){self.error=Some(safe_error(error));self.engine.set_pause(true)?;}}else if self.jobs.get(&(completion.actor,completion.listener)).is_some_and(|job|job.id==completion.id){self.deferred.push_back(completion);}self.pump()?;self.publish()?;},
             }
         }
         self.cancel_all();
+        self.cancel_diagnostics().await;
         self.engine.set_pause(true)?;
         self.engine.save("autosave")?;
         for (_, sender) in self.connected {
@@ -1402,11 +1472,13 @@ fn gather_ids(value: &Value, ids: &mut HashSet<u16>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::paths::write_private;
     use futures::future::BoxFuture;
     use tokio::sync::oneshot;
     type ControlledTurn = (ThinkRequest, oneshot::Sender<Result<ThinkResult>>);
     struct Controlled {
         sender: mpsc::UnboundedSender<ControlledTurn>,
+        efforts: Vec<ReasoningEffort>,
     }
     impl DecisionDriver for Controlled {
         fn think(
@@ -1425,6 +1497,9 @@ mod tests {
         fn reset(&self) -> BoxFuture<'_, ()> {
             Box::pin(async {})
         }
+        fn supported_efforts(&self) -> Vec<ReasoningEffort> {
+            self.efforts.clone()
+        }
     }
     fn fixture() -> (
         Simulation,
@@ -1442,7 +1517,10 @@ mod tests {
                 port: 1,
                 maximum_players: 8,
             },
-            Arc::new(Controlled { sender }),
+            Arc::new(Controlled {
+                sender,
+                efforts: ReasoningEffort::ALL.to_vec(),
+            }),
         );
         (simulation, requests, directory)
     }
@@ -1469,6 +1547,85 @@ mod tests {
             .await
             .unwrap()
             .unwrap()
+    }
+    #[tokio::test]
+    async fn slow_diagnostics_leave_players_saves_recalls_and_stop_responsive() {
+        struct Inspector {
+            entered: tokio::sync::Notify,
+            gate: tokio::sync::Semaphore,
+        }
+        impl DecisionDriver for Inspector {
+            fn think(
+                &self,
+                _: ThinkRequest,
+                _: CancellationToken,
+            ) -> BoxFuture<'_, Result<ThinkResult>> {
+                Box::pin(async { panic!("Paused diagnostics must not run decisions") })
+            }
+            fn reset(&self) -> BoxFuture<'_, ()> {
+                Box::pin(async {})
+            }
+            fn inspect(&self) -> BoxFuture<'_, Result<Value>> {
+                Box::pin(async {
+                    self.entered.notify_one();
+                    let _permit = self.gate.acquire().await?;
+                    Ok(json!({"testDriver":true}))
+                })
+            }
+        }
+        let (mut sim, _, _directory) = fixture();
+        sim.engine.set_pause(true).unwrap();
+        let inspector = Arc::new(Inspector {
+            entered: tokio::sync::Notify::new(),
+            gate: tokio::sync::Semaphore::new(0),
+        });
+        sim.driver = inspector.clone();
+        let handle = sim.handle.clone();
+        let recalls = sim.recall_sender.clone();
+        let player = sim.join(None, "Diagnostic Guest".into()).unwrap();
+        let running = tokio::spawn(sim.run());
+        let check_handle = handle.clone();
+        let checking =
+            tokio::spawn(async move { check_handle.request("diagnostics", json!({})).await });
+        tokio::time::timeout(Duration::from_secs(2), inspector.entered.notified())
+            .await
+            .unwrap();
+        assert!(!checking.is_finished());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            assert!(
+                handle.request("diagnostics", json!({})).await.is_err(),
+                "Only one owned diagnostic task may run"
+            );
+            assert!(handle.request("view", json!({})).await.is_ok());
+            assert!(player.request("cancel", json!({})).await.is_ok());
+            handle
+                .request("save", json!({"name":"during-diagnostics"}))
+                .await
+                .unwrap();
+            let (reply, answer) = oneshot::channel();
+            recalls
+                .send(RecallRequest {
+                    actor_id: 102,
+                    branch: "obsolete".into(),
+                    token: DecisionToken {
+                        job_id: 0,
+                        context_generation: 0,
+                    },
+                    query: "a private memory".into(),
+                    reply,
+                })
+                .await
+                .unwrap();
+            assert!(answer.await.unwrap().is_err());
+            handle.request("stop", json!({})).await.unwrap();
+            running.await.unwrap().unwrap();
+            assert!(
+                checking.await.unwrap().is_err(),
+                "Stopping must cancel an unfinished check"
+            );
+        })
+        .await
+        .expect("Diagnostics blocked the authoritative simulation owner");
     }
     fn only(sim: &mut Simulation, actors: &[u16]) {
         sim.queued.retain(|id, _| actors.contains(id));
@@ -2497,7 +2654,7 @@ mod tests {
             );
             assert_eq!(std::fs::read(&path).ok(), before);
             assert_eq!(sim.scheduling.maximum_calls, maximum);
-            assert_eq!(sim.pending_language, "en");
+            assert_eq!(sim.host_settings.language, "en");
         }
         for limit in [1, 7, 32] {
             sim.manager_request("settings", json!({"maxAgents":limit}))
@@ -2549,6 +2706,210 @@ mod tests {
         assert_ne!(next.0.actor_id, second.0.actor_id);
         assert_eq!(sim.inflight.len(), 2);
         sim.cancel_all();
+    }
+
+    #[tokio::test]
+    async fn changing_effort_preserves_current_npc_and_listener_calls_and_updates_the_next() {
+        let (mut sim, mut requests, directory) = fixture();
+        sim.apply_host_settings(
+            sim.host_settings
+                .patched(&json!({"maxAgents":2,"reasoningEffort":"low"}))
+                .unwrap(),
+        )
+        .unwrap();
+        let player = sim.join(None, "Fixture Guest".into()).unwrap();
+        only(&mut sim, &[102]);
+        sim.player_request(player.actor_id, "listener", json!({"enabled":true}))
+            .unwrap();
+        sim.player_request(
+            player.actor_id,
+            "input",
+            json!({"text":"I intend to wait."}),
+        )
+        .unwrap();
+        sim.pump().unwrap();
+        let first = started(&mut requests).await;
+        let second = started(&mut requests).await;
+        assert_ne!(first.0.listener, second.0.listener);
+        assert_eq!(first.0.reasoning_effort, ReasoningEffort::Low);
+        assert_eq!(second.0.reasoning_effort, ReasoningEffort::Low);
+        let generation = sim.context_generation;
+        sim.manager_request("settings", json!({"reasoningEffort":"max"}))
+            .await
+            .unwrap();
+        assert_eq!(sim.context_generation, generation);
+        assert_eq!(sim.inflight.len(), 2);
+        assert!(sim.jobs.values().all(|job| !job.cancel.is_cancelled()));
+        assert!(requests.try_recv().is_err());
+        assert_eq!(
+            HostSettings::load(directory.path())
+                .unwrap()
+                .reasoning_effort,
+            ReasoningEffort::Max
+        );
+        for (request, reply) in [first, second] {
+            assert_eq!(request.reasoning_effort, ReasoningEffort::Low);
+            let result = if request.listener {
+                ThinkResult {
+                    decision: crate::codex::DecisionResponse::Listener(
+                        crate::model::Interpretation::parse(
+                            json!({"summary":"A controlled intention.","plan":[]}),
+                        )
+                        .unwrap(),
+                    ),
+                    model_output: None,
+                    tokens: 1,
+                    latency_ms: 1.,
+                    cleanup_ms: 0.,
+                    recalled: vec![],
+                }
+            } else {
+                decision(json!([{"kind":"wait","seconds":600}]))
+            };
+            reply.send(Ok(result)).unwrap();
+            finish(&mut sim).await;
+        }
+        assert!(sim.engine.actor(102).unwrap().activity.is_some());
+        sim.queued.clear();
+        wake(&mut sim, 103, 0., true);
+        sim.player_request(player.actor_id, "input", json!({"text":"I remain here."}))
+            .unwrap();
+        sim.pump().unwrap();
+        let next_first = started(&mut requests).await;
+        let next_second = started(&mut requests).await;
+        assert_ne!(next_first.0.listener, next_second.0.listener);
+        assert_eq!(next_first.0.reasoning_effort, ReasoningEffort::Max);
+        assert_eq!(next_second.0.reasoning_effort, ReasoningEffort::Max);
+        assert_eq!(next_first.0.token.context_generation, generation);
+        assert_eq!(next_second.0.token.context_generation, generation);
+        sim.cancel_all();
+    }
+
+    #[tokio::test]
+    async fn unsupported_catalog_effort_and_write_failure_leave_settings_unchanged() {
+        let (mut sim, _requests, directory) = fixture();
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        sim.driver = Arc::new(Controlled {
+            sender,
+            efforts: vec![ReasoningEffort::Low],
+        });
+        sim.supported_efforts = sim.driver.supported_efforts();
+        sim.apply_host_settings(
+            sim.host_settings
+                .patched(&json!({"reasoningEffort":"low"}))
+                .unwrap(),
+        )
+        .unwrap();
+        sim.host_settings.save(directory.path()).unwrap();
+        let original = sim.host_settings.clone();
+        let before = std::fs::read(directory.path().join("server-settings.json")).unwrap();
+        assert!(
+            sim.manager_request(
+                "settings",
+                json!({"language":"pl","reasoningEffort":"high"})
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(sim.host_settings, original);
+        assert_eq!(
+            std::fs::read(directory.path().join("server-settings.json")).unwrap(),
+            before
+        );
+        let path = directory.path().join("server-settings.json");
+        let target = directory.path().join("original.json");
+        std::fs::rename(&path, &target).unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        assert!(
+            sim.manager_request("settings", json!({"language":"pl","maxAgents":7}))
+                .await
+                .is_err()
+        );
+        assert_eq!(sim.host_settings, original);
+        assert_eq!(
+            sim.scheduling.maximum_calls,
+            usize::from(original.max_agents)
+        );
+        assert_eq!(std::fs::read(target).unwrap(), before);
+    }
+
+    #[tokio::test]
+    async fn cached_capabilities_allow_settings_edits_while_the_worker_needs_recovery() {
+        struct Recovering;
+        impl DecisionDriver for Recovering {
+            fn think(
+                &self,
+                _: ThinkRequest,
+                _: CancellationToken,
+            ) -> BoxFuture<'_, Result<ThinkResult>> {
+                Box::pin(async { bail!("Fixture worker needs recovery") })
+            }
+            fn reset(&self) -> BoxFuture<'_, ()> {
+                Box::pin(async {})
+            }
+            fn inspect(&self) -> BoxFuture<'_, Result<Value>> {
+                Box::pin(async { bail!("Fixture worker needs recovery") })
+            }
+            fn supported_efforts(&self) -> Vec<ReasoningEffort> {
+                vec![ReasoningEffort::Low, ReasoningEffort::Max]
+            }
+        }
+        let (mut sim, _requests, directory) = fixture();
+        sim.driver = Arc::new(Recovering);
+        sim.supported_efforts = sim.driver.supported_efforts();
+        sim.manager_request("settings", json!({"language":"pl","reasoningEffort":"low"}))
+            .await
+            .unwrap();
+        assert_eq!(sim.host_settings.language, "pl");
+        assert_eq!(
+            HostSettings::load(directory.path())
+                .unwrap()
+                .reasoning_effort,
+            ReasoningEffort::Low
+        );
+        assert!(
+            sim.manager_request("settings", json!({"reasoningEffort":"high"}))
+                .await
+                .is_err()
+        );
+        assert_eq!(sim.host_settings.reasoning_effort, ReasoningEffort::Low);
+        assert_eq!(sim.engine.language, "en");
+    }
+
+    #[tokio::test]
+    async fn restore_retains_capabilities_and_settings_edits_do_not_boot_a_replacement_worker() {
+        let (mut sim, _requests, directory) = fixture();
+        let advertised = sim.supported_efforts.clone();
+        sim.manager_request("settings", json!({"language":"pl","reasoningEffort":"low"}))
+            .await
+            .unwrap();
+        sim.engine.save("capabilities").unwrap();
+        sim.production = Some(WorkerOptions {
+            codex_bin: Some(directory.path().join("intentionally-unavailable-codex")),
+            sandbox_helper: None,
+        });
+        sim.manager_request("load", json!({"name":"capabilities"}))
+            .await
+            .unwrap();
+        assert!(sim.driver.supported_efforts().is_empty());
+        assert_eq!(sim.supported_efforts, advertised);
+        assert_eq!(
+            sim.manager_view().unwrap()["supportedEfforts"],
+            json!(advertised)
+        );
+        sim.manager_request("settings", json!({"reasoningEffort":"max","maxAgents":7}))
+            .await
+            .unwrap();
+        assert!(sim.driver.supported_efforts().is_empty());
+        assert_eq!(sim.host_settings.reasoning_effort, ReasoningEffort::Max);
+        assert_eq!(
+            HostSettings::load(directory.path())
+                .unwrap()
+                .reasoning_effort,
+            ReasoningEffort::Max
+        );
+        assert_eq!(sim.engine.language, "pl");
+        assert!(sim.engine.world.manual_pause);
     }
 
     #[tokio::test]
@@ -2809,7 +3170,7 @@ mod tests {
                     .is_err()
             );
             assert_eq!(std::fs::read(&path).unwrap(), before);
-            assert_eq!(sim.pending_language, "en");
+            assert_eq!(sim.host_settings.language, "en");
         }
         for rate in [1, 5, 15] {
             sim.manager_request("settings", json!({"npcUpdateRate":rate}))

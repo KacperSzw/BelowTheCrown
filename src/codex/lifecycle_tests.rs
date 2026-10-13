@@ -13,6 +13,7 @@ fn request() -> ThinkRequest {
         identity: Some(engine.npc_identity(102).unwrap()),
         input: json!({"world":{"self":{"id":102}},"execution":{"reason":"current"}}),
         listener: false,
+        reasoning_effort: ReasoningEffort::default(),
     }
 }
 fn fixture() -> (
@@ -38,7 +39,11 @@ fn fixture() -> (
         )
         .unwrap(),
     );
-    driver.inner.state.lock().expect("worker state").rpc = Some(rpc.clone());
+    {
+        let mut state = driver.inner.state.lock().expect("worker state");
+        state.rpc = Some(rpc.clone());
+        state.supported_efforts = ReasoningEffort::ALL.to_vec();
+    }
     (driver, rpc, outgoing, receiver, directory)
 }
 async fn next(outgoing: &mut broadcast::Receiver<Value>, method: &str) -> Value {
@@ -55,7 +60,7 @@ async fn reply(rpc: &Rpc, request: &Value, result: Value) {
         .unwrap();
 }
 async fn thread_ack(rpc: &Rpc, start: &Value, thread: &str, model: &str) {
-    reply(rpc,start,json!({"model":model,"reasoningEffort":EFFORT,"serviceTier":null,"instructionSources":[],"thread":{"id":thread}})).await;
+    reply(rpc,start,json!({"model":model,"reasoningEffort":start["params"]["config"]["model_reasoning_effort"],"serviceTier":null,"instructionSources":[],"thread":{"id":thread}})).await;
 }
 async fn completed(rpc: &Rpc, thread: &str, turn: &str) {
     rpc.inject(json!({"method":"item/completed","params":{"threadId":thread,"turnId":turn,"item":{"type":"agentMessage","text":json!({"summary":"Current concern.","goals":[],"utterance":null,"plan":[{"kind":"wait","seconds":600}],"memories":[],"relationships":[],"acceptPlots":[],"acceptHeardProposals":[]}).to_string()}}})).await.unwrap();
@@ -71,21 +76,30 @@ async fn close_thread(rpc: &Rpc, outgoing: &mut broadcast::Receiver<Value>, thre
 }
 
 #[tokio::test]
-async fn completed_npc_decisions_reuse_their_thread_but_revoke_recall_between_turns() {
+async fn completed_npc_decisions_reuse_their_thread_across_effort_changes_but_revoke_recall() {
     let (driver, rpc, mut outgoing, _recalls, _directory) = fixture();
     let original = request();
-    for suffix in ["first", "second"] {
+    for (suffix, effort) in [
+        ("first", ReasoningEffort::High),
+        ("second", ReasoningEffort::Low),
+    ] {
         let copy = driver.clone();
-        let request = original.clone();
+        let mut request = original.clone();
+        request.reasoning_effort = effort;
         let thinking =
             tokio::spawn(async move { copy.think(request, CancellationToken::new()).await });
         if suffix == "first" {
             let start = next(&mut outgoing, "thread/start").await;
             assert_eq!(start["params"]["ephemeral"], true);
+            assert_eq!(
+                start["params"]["config"]["model_reasoning_effort"],
+                effort.as_str()
+            );
             thread_ack(&rpc, &start, "actor-thread", MODEL).await;
         }
         let turn = next(&mut outgoing, "turn/start").await;
         assert_eq!(turn["params"]["threadId"], "actor-thread");
+        assert_eq!(turn["params"]["effort"], effort.as_str());
         reply(&rpc, &turn, json!({"turn":{"id":suffix}})).await;
         completed(&rpc, "actor-thread", suffix).await;
         assert!(thinking.await.unwrap().is_ok());
@@ -393,14 +407,43 @@ async fn dropping_the_public_future_does_not_drop_its_cleanup_owner() {
 
 #[tokio::test]
 async fn rejected_metadata_still_unloads_the_created_thread() {
+    for (model, effort) in [
+        ("unexpected-model", ReasoningEffort::High),
+        (MODEL, ReasoningEffort::Low),
+    ] {
+        let (driver, rpc, mut outgoing, _recalls, _directory) = fixture();
+        let copy = driver.clone();
+        let thinking =
+            tokio::spawn(async move { copy.think(request(), CancellationToken::new()).await });
+        let start = next(&mut outgoing, "thread/start").await;
+        reply(&rpc, &start, json!({"model":model,"reasoningEffort":effort,"serviceTier":null,"instructionSources":[],"thread":{"id":"bad-thread"}})).await;
+        close_thread(&rpc, &mut outgoing, "bad-thread").await;
+        assert!(thinking.await.unwrap().is_err());
+        assert!(!rpc.closed());
+        driver.reset().await;
+    }
+}
+
+#[tokio::test]
+async fn unsupported_effort_is_rejected_before_starting_or_falling_back() {
     let (driver, rpc, mut outgoing, _recalls, _directory) = fixture();
-    let copy = driver.clone();
-    let thinking =
-        tokio::spawn(async move { copy.think(request(), CancellationToken::new()).await });
-    let start = next(&mut outgoing, "thread/start").await;
-    thread_ack(&rpc, &start, "bad-thread", "unexpected-model").await;
-    close_thread(&rpc, &mut outgoing, "bad-thread").await;
-    assert!(thinking.await.unwrap().is_err());
+    driver
+        .inner
+        .state
+        .lock()
+        .expect("worker state")
+        .supported_efforts = vec![ReasoningEffort::Low];
+    let error = driver
+        .think(request(), CancellationToken::new())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("does not support high"), "{error}");
+    assert!(outgoing.try_recv().is_err());
+    assert_eq!(
+        driver.inspect().await.unwrap()["supportedEfforts"],
+        json!(["low"])
+    );
     assert!(!rpc.closed());
     driver.reset().await;
 }

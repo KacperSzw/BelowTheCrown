@@ -1,4 +1,7 @@
-use crate::paths::{find_executable, private_dir, write_private};
+use crate::{
+    model::{MODEL, ReasoningEffort},
+    paths::{find_executable, private_dir, write_private},
+};
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -135,7 +138,8 @@ pub fn worker_config() -> String {
         "recommended_plugins",
     ];
     format!(
-        "model = \"gpt-6-luna\"\nmodel_reasoning_effort = \"high\"\nservice_tier = \"default\"\napproval_policy = \"never\"\nsandbox_mode = \"read-only\"\nweb_search = \"disabled\"\nproject_doc_max_bytes = 0\ncli_auth_credentials_store = \"file\"\ninclude_permissions_instructions = false\ninclude_collaboration_mode_instructions = false\ninclude_environment_context = false\ninclude_apps_instructions = false\nthread_unload_delay_secs = 0\n[agents]\nenabled = false\n[skills]\ninclude_instructions = false\n[skills.bundled]\nenabled = false\n[cloud.skills]\nenabled = false\n[orchestrator.mcp]\nenabled = false\n[tools.experimental_request_user_input]\nenabled = false\n[features]\n{}\nskip_host_skill_discovery = true\n[tools.update_plan]\nenabled = false\n",
+        "model = \"{MODEL}\"\nmodel_reasoning_effort = \"{}\"\nservice_tier = \"default\"\napproval_policy = \"never\"\nsandbox_mode = \"read-only\"\nweb_search = \"disabled\"\nproject_doc_max_bytes = 0\ncli_auth_credentials_store = \"file\"\ninclude_permissions_instructions = false\ninclude_collaboration_mode_instructions = false\ninclude_environment_context = false\ninclude_apps_instructions = false\nthread_unload_delay_secs = 0\n[agents]\nenabled = false\n[skills]\ninclude_instructions = false\n[skills.bundled]\nenabled = false\n[cloud.skills]\nenabled = false\n[orchestrator.mcp]\nenabled = false\n[tools.experimental_request_user_input]\nenabled = false\n[features]\n{}\nskip_host_skill_discovery = true\n[tools.update_plan]\nenabled = false\n",
+        ReasoningEffort::default().as_str(),
         disabled.map(|name| format!("{name} = false")).join("\n")
     )
 }
@@ -309,6 +313,18 @@ impl WorkerSpec {
     pub fn has_catalog(&self) -> bool {
         catalog_matches_login(&self.private_home, &self.version)
     }
+    pub fn supported_efforts(&self) -> Result<Vec<ReasoningEffort>> {
+        let catalog: Value =
+            serde_json::from_slice(&fs::read(self.private_home.join("npc-models.json"))?)?;
+        let models = catalog["models"]
+            .as_array()
+            .context("Missing private models")?;
+        ensure!(
+            models.len() == 1 && models[0]["slug"] == MODEL,
+            "Invalid private Luna descriptor"
+        );
+        supported_efforts(&models[0])
+    }
     pub fn freeze_discovered_catalog(&self) -> Result<()> {
         let cache = fs::read(self.private_home.join("models_cache.json"))
             .context("Private discovery did not supply a model descriptor")?;
@@ -398,7 +414,7 @@ fn sanitized_catalog(cache: &[u8], version: &str) -> Result<Vec<u8>> {
         .context("Missing discovered models")?;
     let matches = models
         .iter()
-        .filter(|m| m["slug"] == crate::model::MODEL)
+        .filter(|m| m["slug"] == MODEL)
         .collect::<Vec<_>>();
     ensure!(
         matches.len() == 1,
@@ -407,14 +423,18 @@ fn sanitized_catalog(cache: &[u8], version: &str) -> Result<Vec<u8>> {
     let mut model = matches[0].clone();
     ensure!(
         model["context_window"].as_u64().is_some_and(|n| n > 0)
-            && model["model_messages"].is_object()
-            && model["supported_reasoning_levels"]
-                .as_array()
-                .is_some_and(|levels| levels
-                    .iter()
-                    .any(|level| level["effort"] == crate::model::EFFORT)),
-        "Luna descriptor is incomplete or does not support high reasoning"
+            && model["model_messages"].is_object(),
+        "Luna descriptor is incomplete"
     );
+    let efforts = supported_efforts(&model)?;
+    model["supported_reasoning_levels"]
+        .as_array_mut()
+        .expect("validated reasoning levels")
+        .retain(|level| {
+            efforts
+                .iter()
+                .any(|effort| level["effort"] == effort.as_str())
+        });
     model["tool_mode"] = json!("direct");
     model["experimental_supported_tools"] = json!([]);
     model["shell_type"] = json!("disabled");
@@ -426,6 +446,33 @@ fn sanitized_catalog(cache: &[u8], version: &str) -> Result<Vec<u8>> {
     model["include_apps_usage_instructions"] = json!(false);
     model["model_messages"]["persistent_instructions"] = json!("");
     serde_json::to_vec(&json!({"models":[model]})).map_err(Into::into)
+}
+
+fn supported_efforts(model: &Value) -> Result<Vec<ReasoningEffort>> {
+    let levels = model["supported_reasoning_levels"]
+        .as_array()
+        .context("Missing Luna reasoning levels")?;
+    let mut efforts = Vec::new();
+    for level in levels {
+        let name = level["effort"]
+            .as_str()
+            .context("Invalid Luna reasoning level")?;
+        if let Some(effort) = ReasoningEffort::ALL
+            .into_iter()
+            .find(|effort| effort.as_str() == name)
+        {
+            ensure!(
+                !efforts.contains(&effort),
+                "Duplicate Luna reasoning level: {name}"
+            );
+            efforts.push(effort);
+        }
+    }
+    ensure!(
+        !efforts.is_empty(),
+        "Luna descriptor has no supported reasoning levels"
+    );
+    Ok(efforts)
 }
 
 #[cfg(test)]
@@ -524,6 +571,54 @@ mod tests {
             "project_doc_max_bytes = 0",
         ] {
             assert!(config.contains(item));
+        }
+    }
+    #[test]
+    fn catalog_retains_advertised_known_efforts_and_strips_integrations() {
+        let mut discovered = json!({"client_version":"0.160.1","identity":"test-owned","fetched_at":"2026-01-01","models":[{"slug":MODEL,"context_window":1000,"model_messages":{"persistent_instructions":"external"},"supported_reasoning_levels":[],"tool_mode":"parallel","supports_search_tool":true}]});
+        for advertised in [vec![ReasoningEffort::Low], ReasoningEffort::ALL.to_vec()] {
+            let mut levels = advertised
+                .iter()
+                .map(|effort| json!({"effort":effort,"description":"provider description"}))
+                .collect::<Vec<_>>();
+            levels.push(json!({"effort":"future","description":"unsupported by this client"}));
+            discovered["models"][0]["supported_reasoning_levels"] = json!(levels);
+            let catalog: Value = serde_json::from_slice(
+                &sanitized_catalog(&serde_json::to_vec(&discovered).unwrap(), "0.160.1").unwrap(),
+            )
+            .unwrap();
+            let model = &catalog["models"][0];
+            assert_eq!(supported_efforts(model).unwrap(), advertised);
+            assert_eq!(
+                model["supported_reasoning_levels"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                advertised.len()
+            );
+            assert_eq!(
+                model["supported_reasoning_levels"][0]["description"],
+                "provider description"
+            );
+            assert_eq!(model["model_messages"]["persistent_instructions"], "");
+            assert_eq!(model["supports_search_tool"], false);
+            assert_eq!(model["shell_type"], "disabled");
+            assert_eq!(model["experimental_supported_tools"], json!([]));
+        }
+    }
+    #[test]
+    fn catalog_rejects_missing_malformed_and_duplicate_efforts() {
+        for levels in [
+            Value::Null,
+            json!([]),
+            json!([{"effort":5}]),
+            json!([{"effort":"future"}]),
+            json!([{"effort":"low"},{"effort":"low"}]),
+        ] {
+            assert!(
+                supported_efforts(&json!({"supported_reasoning_levels":levels})).is_err(),
+                "Accepted {levels}"
+            );
         }
     }
 }

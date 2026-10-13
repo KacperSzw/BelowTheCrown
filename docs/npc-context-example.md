@@ -13,7 +13,8 @@ czyści. Opis aktualnego formatu znajduje się w [npc-minds.md](npc-minds.md).
 
 Tożsamość (`actorId`, `name`, `role`, `biography`, `personality`) wiąże silnik
 w instrukcji prywatnego wątku Codexa. Model nie wybiera osoby, za którą działa.
-Produkcja używa `gpt-6-luna`, `high`, standardowego tieru. Wątek NPC jest
+Produkcja używa `gpt-6-luna` ze standardowym tierem. Wysiłek rozumowania
+wybiera się w ustawieniach hosta; domyślnie jest to `high`. Wątek NPC jest
 kontynuowany po poprawnej odpowiedzi; zmiana gałęzi, tożsamości, wczytanie gry
 lub anulowanie unieważnia dawny kontekst. Interpreter wypowiedzi gracza ma
 osobny, świeży wątek.

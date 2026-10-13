@@ -95,7 +95,7 @@ fn check_payload(
     history: &[ThinkRequest],
 ) -> Result<()> {
     ensure!(
-        body["model"] == MODEL && body["reasoning"]["effort"] == EFFORT,
+        body["model"] == MODEL && body["reasoning"]["effort"] == expected.reasoning_effort.as_str(),
         "Wrong model or reasoning"
     );
     ensure!(
@@ -103,18 +103,25 @@ fn check_payload(
         "Standard wire tier must be omitted/null"
     );
     let input = body["input"].as_array().context("Missing model input")?;
-    let tools = if lite {
+    let prefixes = input
+        .iter()
+        .filter(|i| i["type"] == "additional_tools")
+        .collect::<Vec<_>>();
+    ensure!(prefixes.len() <= 1, "Duplicate tool prefixes");
+    let tools: &[Value] = if lite {
         ensure!(
             body["instructions"].is_null() && body["tools"].is_null(),
             "Lite tools/instructions must be input prefixes"
         );
-        input
-            .iter()
-            .find(|i| i["type"] == "additional_tools")
-            .context("Missing Lite tool prefix")?["tools"]
-            .as_array()
-            .context("Missing Lite tools")?
+        match prefixes.first() {
+            Some(prefix) => prefix["tools"].as_array().context("Missing Lite tools")?,
+            None => {
+                ensure!(expected.listener, "Missing NPC Lite tool prefix");
+                &[]
+            }
+        }
     } else {
+        ensure!(prefixes.is_empty(), "Unexpected normal tool prefix");
         body["tools"].as_array().context("Missing normal tools")?
     };
     let names = tool_names(tools);
@@ -143,7 +150,8 @@ fn check_payload(
     let params = state.thread_params(expected)?;
     let base = params["baseInstructions"].as_str().unwrap();
     let developer = params["developerInstructions"].as_str().unwrap();
-    if !lite {
+    let base_in_input = body["instructions"].is_null();
+    if !base_in_input {
         ensure!(
             body["instructions"] == base,
             "Native model instructions were not replaced"
@@ -179,7 +187,8 @@ fn check_payload(
         .filter(|i| i["role"] == "developer")
         .map(|i| visible_text(i))
         .collect::<Vec<_>>();
-    let expected_developers = if lite {
+    // Newer native versions put base instructions in a leading developer message for both APIs.
+    let expected_developers = if base_in_input {
         vec![base.to_owned(), developer.to_owned()]
     } else {
         vec![developer.to_owned()]
@@ -221,7 +230,7 @@ fn check_payload(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "Requires native Codex 0.160.1 and BTC_CONFORMANCE_CATALOG from private doctor discovery; no paid calls"]
+#[ignore = "Requires native Codex >=0.160.1 and BTC_CONFORMANCE_CATALOG from private doctor discovery; no paid calls"]
 async fn codex_request_conformance() -> Result<()> {
     let catalog = std::fs::read(
         std::env::var_os("BTC_CONFORMANCE_CATALOG")
@@ -237,10 +246,7 @@ async fn codex_request_conformance() -> Result<()> {
             false,
         )?;
         let spec = WorkerSpec::prepare(directory.path(), &WorkerOptions::default())?;
-        ensure!(
-            spec.probe().await? == "codex-cli 0.160.1",
-            "Conformance is pinned to Codex 0.160.1"
-        );
+        spec.probe().await?;
         let mut descriptor: Value = serde_json::from_slice(&catalog)?;
         descriptor["models"][0]["use_responses_lite"] = json!(lite);
         paths::write_private(
@@ -248,6 +254,11 @@ async fn codex_request_conformance() -> Result<()> {
             &serde_json::to_vec(&descriptor)?,
             false,
         )?;
+        let efforts = spec.supported_efforts()?;
+        ensure!(
+            efforts.len() >= 2,
+            "Conformance needs at least two advertised reasoning efforts"
+        );
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
         let port = listener.local_addr()?.port();
         let config = format!(
@@ -285,7 +296,11 @@ async fn codex_request_conformance() -> Result<()> {
             WorkerOptions::default(),
             recalls,
         )?;
-        driver.inner.state.lock().expect("worker state").rpc = Some(rpc.clone());
+        {
+            let mut state = driver.inner.state.lock().expect("worker state");
+            state.rpc = Some(rpc.clone());
+            state.supported_efforts = efforts.clone();
+        }
         let recall = tokio::spawn(async move {
             let request = recall_requests
                 .recv()
@@ -308,7 +323,8 @@ async fn codex_request_conformance() -> Result<()> {
             let mut expected=vec![];
             for (index,(actor,listener)) in [(102,false),(101,true),(102,false),(103,false)].into_iter().enumerate() {
                 let identity=if listener {None}else{Some(engine.npc_identity(actor)?)};
-                let request=ThinkRequest {actor_id:actor,branch:engine.world.branch.clone(),token:DecisionToken{job_id:index as u64+1,context_generation:0},input:json!({"observation":format!("current-{index}"),"world":{"self":{"id":actor,"biography":identity.as_ref().map(|i|&i.biography),"personality":identity.as_ref().map(|i|&i.personality)}}}),identity,listener};
+                let reasoning_effort = if index == 0 {efforts[0]} else {efforts[efforts.len()-1]};
+                let request=ThinkRequest {actor_id:actor,branch:engine.world.branch.clone(),token:DecisionToken{job_id:index as u64+1,context_generation:0},input:json!({"observation":format!("current-{index}"),"world":{"self":{"id":actor,"biography":identity.as_ref().map(|i|&i.biography),"personality":identity.as_ref().map(|i|&i.personality)}}}),identity,listener,reasoning_effort};
                 let cancellation=CancellationToken::new();
                 let mut thinking=driver.think(request.clone(),cancellation.clone());
                 let result=tokio::select! { result=&mut thinking=>result, _=tokio::time::sleep(Duration::from_secs(30))=>{cancellation.cancel();let _=thinking.await;bail!("Mock decision timed out")} }?;
@@ -320,6 +336,7 @@ async fn codex_request_conformance() -> Result<()> {
                 let body=requests.recv().await.context("Missing captured request")?;
                 if sequence==1 {
                     let text=body.to_string(); ensure!(text.contains("own-recall") && text.contains("Synthetic private evidence"),"Recall output missing from round trip");
+                    ensure!(body["reasoning"]["effort"] == expected[0].reasoning_effort.as_str(),"Recall continuation changed reasoning effort");
                 } else {
                     let history=if index==2 {&expected[..1]}else{&expected[..0]};
                     check_payload(&body,lite,&expected[index],&driver.inner,history)?;

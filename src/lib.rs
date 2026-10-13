@@ -1,13 +1,17 @@
 pub mod codex;
 pub mod content;
+pub mod diagnostics;
 pub mod engine;
+pub mod host;
 pub mod localization;
 pub mod manager;
 pub mod model;
 pub mod paths;
+pub mod player;
 pub mod portraits;
 pub mod room_context;
 pub mod runtime;
+pub mod settings;
 pub mod simulation;
 pub mod ssh;
 pub mod store;

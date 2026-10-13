@@ -8,7 +8,7 @@ mod worker;
 
 use crate::{
     content::WorldContent,
-    model::{Decision, EFFORT, Interpretation, MODEL, NpcIdentity},
+    model::{Decision, Interpretation, MODEL, NpcIdentity, ReasoningEffort},
 };
 use anyhow::{Context, Result, bail, ensure};
 use futures::future::BoxFuture;
@@ -48,6 +48,7 @@ pub struct ThinkRequest {
     pub identity: Option<NpcIdentity>,
     pub input: Value,
     pub listener: bool,
+    pub reasoning_effort: ReasoningEffort,
 }
 #[derive(Debug)]
 pub struct ThinkResult {
@@ -94,8 +95,13 @@ pub trait DecisionDriver: Send + Sync {
         cancel: CancellationToken,
     ) -> BoxFuture<'_, Result<ThinkResult>>;
     fn reset(&self) -> BoxFuture<'_, ()>;
+    fn supported_efforts(&self) -> Vec<ReasoningEffort> {
+        ReasoningEffort::ALL.to_vec()
+    }
     fn inspect(&self) -> BoxFuture<'_, Result<Value>> {
-        Box::pin(async { Ok(json!({"testDriver":true})) })
+        Box::pin(async {
+            Ok(json!({"testDriver":true,"supportedEfforts":self.supported_efforts()}))
+        })
     }
 }
 
@@ -107,6 +113,7 @@ struct WorkerState {
     rpc: Option<Arc<Rpc>>,
     owners: HashMap<u64, Owner>,
     threads: HashMap<u16, ActorThread>,
+    supported_efforts: Vec<ReasoningEffort>,
 }
 struct ActorThread {
     id: String,
@@ -184,6 +191,7 @@ impl CodexDriver {
                     rpc: None,
                     owners: HashMap::new(),
                     threads: HashMap::new(),
+                    supported_efforts: Vec::new(),
                 }),
                 startup: Mutex::new(()),
                 sequence: AtomicU64::new(0),
@@ -194,7 +202,7 @@ impl CodexDriver {
         let epoch = self.inner.state.lock().expect("worker state").epoch;
         self.inner.ready(epoch, &CancellationToken::new()).await?;
         Ok(
-            json!({"model":MODEL,"effort":EFFORT,"serviceTier":"default","catalog":"private provider-derived descriptor","authentication":"available","npcContext":"actor thread reused until interruption or reset"}),
+            json!({"model":MODEL,"supportedEfforts":self.supported_efforts(),"serviceTier":"default","catalog":"private provider-derived descriptor","authentication":"available","npcContext":"actor thread reused until interruption or reset"}),
         )
     }
 }
@@ -284,7 +292,17 @@ impl DriverState {
         }
         .await;
         match initialized {
-            Ok(ready) if self.current(epoch, &ready) && !cancel.is_cancelled() => Ok(ready),
+            Ok(ready) if self.current(epoch, &ready) && !cancel.is_cancelled() => {
+                let efforts = match spec.supported_efforts() {
+                    Ok(efforts) => efforts,
+                    Err(error) => {
+                        ready.close().await;
+                        return Err(error);
+                    }
+                };
+                self.state.lock().expect("worker state").supported_efforts = efforts;
+                Ok(ready)
+            }
             Ok(ready) => {
                 ready.close().await;
                 bail!("Obsolete worker startup")
@@ -338,7 +356,7 @@ impl DriverState {
                 "cwd":"/work","environments":[],"ephemeral":true,"serviceTier":"default",
                 "baseInstructions":format!("{TRUST}\n\n{}\n\nWrite {output} in {language}. Preserve names and quoted earlier speech.",self.content.instructions(if request.listener {"listener"} else {"npc"},&self.language)),
                 "developerInstructions":identity,
-                "config":{"model_reasoning_effort":EFFORT,"service_tier":"default","features.fast_mode":false},
+                "config":{"model_reasoning_effort":request.reasoning_effort,"service_tier":"default","features.fast_mode":false},
                 "dynamicTools":if request.listener { json!([]) } else { json!([{"type":"function","name":"recall","description":"Read-only search of your own memories. Returns evidence IDs.","inputSchema":{"type":"object","properties":{"query":{"type":"string","maxLength":180}},"required":["query"],"additionalProperties":false}}]) }
             }),
         )
@@ -353,6 +371,15 @@ impl DriverState {
         let started = Instant::now();
         let params = self.thread_params(&request)?;
         let rpc = self.ready(epoch, &cancel).await?;
+        ensure!(
+            self.state
+                .lock()
+                .expect("worker state")
+                .supported_efforts
+                .contains(&request.reasoning_effort),
+            "Luna does not support {} reasoning with the current model descriptor",
+            request.reasoning_effort.as_str()
+        );
         let mut notifications = rpc.subscribe();
         let mut thread: Option<String> = None;
         let mut turn: Option<String> = None;
@@ -386,7 +413,7 @@ impl DriverState {
                 let id = metadata["thread"]["id"].as_str().context("Codex returned no thread ID")?.to_owned();
                 // Capture ownership before validating metadata, including rejected starts.
                 thread = Some(id.clone());
-                ensure!(metadata["model"] == MODEL && metadata["reasoningEffort"] == EFFORT,"Codex did not honor Luna/high");
+                ensure!(metadata["model"] == MODEL && metadata["reasoningEffort"] == request.reasoning_effort.as_str(),"Codex did not honor Luna/{}",request.reasoning_effort.as_str());
                 ensure!(standard_tier(&metadata["serviceTier"]),"Codex did not honor standard routing");
                 ensure!(metadata["instructionSources"].as_array().is_none_or(Vec::is_empty),"Codex inherited external instructions");
                 id
@@ -399,7 +426,7 @@ impl DriverState {
                 own.remove("biography");
                 own.remove("personality");
             }
-            let ack = acknowledged(&rpc,&cancel,"turn/start",json!({"threadId":id,"model":MODEL,"effort":EFFORT,"serviceTier":"default","serviceTierForTurn":"default","environments":[],"approvalPolicy":"never","input":[{"type":"text","text":input.to_string(),"text_elements":[]}],"outputSchema":if request.listener {interpretation_schema()} else {decision_schema()},"summary":"none"})).await?;
+            let ack = acknowledged(&rpc,&cancel,"turn/start",json!({"threadId":id,"model":MODEL,"effort":request.reasoning_effort,"serviceTier":"default","serviceTierForTurn":"default","environments":[],"approvalPolicy":"never","input":[{"type":"text","text":input.to_string(),"text_elements":[]}],"outputSchema":if request.listener {interpretation_schema()} else {decision_schema()},"summary":"none"})).await?;
             let expected = ack["turn"]["id"].as_str().context("Codex returned no turn ID")?.to_owned();
             turn = Some(expected.clone());
             ensure!(!cancel.is_cancelled() && self.current(epoch,&rpc),"Decision cancelled");
@@ -731,6 +758,14 @@ impl DecisionDriver for CodexDriver {
     }
     fn inspect(&self) -> BoxFuture<'_, Result<Value>> {
         Box::pin(CodexDriver::inspect(self))
+    }
+    fn supported_efforts(&self) -> Vec<ReasoningEffort> {
+        self.inner
+            .state
+            .lock()
+            .expect("worker state")
+            .supported_efforts
+            .clone()
     }
 }
 

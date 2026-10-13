@@ -174,8 +174,8 @@ impl Fixture {
                 }
             }
         });
-        let server = ssh::serve(
-            game,
+        let server = ssh::SshListener::bind(
+            directory.path(),
             SshOptions {
                 bind: Ipv4Addr::LOCALHOST,
                 port: 0,
@@ -185,7 +185,8 @@ impl Fixture {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .serve(game);
         Self {
             directory,
             server,
@@ -793,8 +794,8 @@ async fn ssh_private_files_refuse_symlinks_without_touching_the_target() {
             }),
         };
         assert!(
-            ssh::serve(
-                handle,
+            ssh::SshListener::bind(
+                &handle.info.data_dir,
                 SshOptions {
                     bind: Ipv4Addr::LOCALHOST,
                     port: 0,

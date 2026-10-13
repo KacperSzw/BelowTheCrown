@@ -2,6 +2,7 @@
 use crate::{
     paths,
     runtime::{GameHandle, PlayerConnection, RuntimeRequest},
+    settings::{self, HostSettings},
     ui::{self, Draft, Operation, PlayerUi, Submission},
 };
 use anyhow::{Context, Result, anyhow, ensure};
@@ -21,7 +22,7 @@ use std::{
     collections::HashMap,
     fs::{self, OpenOptions},
     io::{Read, Write},
-    net::{IpAddr, Ipv4Addr, Shutdown, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Shutdown},
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -46,22 +47,11 @@ pub struct SshOptions {
 }
 impl SshOptions {
     pub fn validate(&self) -> Result<()> {
+        settings::validate_network(Some(self.bind), Some(self.subnet))?;
         ensure!(
-            self.bind.is_private() || self.bind.is_loopback() || self.bind.is_link_local(),
-            "Select a private LAN IPv4 address or localhost."
-        );
-        ensure!(
-            !self.bind.is_unspecified() && self.subnet.contains(&self.bind),
-            "The selected LAN address must belong to its subnet."
-        );
-        let private = |ip: Ipv4Addr| ip.is_private() || ip.is_loopback() || ip.is_link_local();
-        ensure!(
-            private(self.subnet.network()) && private(self.subnet.broadcast()),
-            "The guest subnet must stay inside a private LAN network."
-        );
-        ensure!(
-            (1..=32).contains(&self.maximum_players),
-            "Choose a player limit between 1 and 32."
+            (1..=usize::from(HostSettings::MAX_PLAYERS)).contains(&self.maximum_players),
+            "Choose a player limit between 1 and {}.",
+            HostSettings::MAX_PLAYERS
         );
         Ok(())
     }
@@ -75,9 +65,6 @@ impl SshOptions {
 
 pub struct SshServer {
     pub port: u16,
-    pub fingerprint: String,
-    pub known_hosts: PathBuf,
-    pub endpoints: Vec<SocketAddr>,
     cancel: CancellationToken,
     tasks: Vec<JoinHandle<Result<()>>>,
 }
@@ -98,81 +85,110 @@ impl Drop for SshServer {
     }
 }
 
-pub async fn serve(handle: GameHandle, options: SshOptions) -> Result<SshServer> {
-    options.validate()?;
-    // Host console environment flags must not remove remote voice/action colors.
-    crossterm::style::force_color_output(true);
-    let directory = handle.info.data_dir.join("ssh");
-    paths::private_dir(&directory)?;
-    let host_key = host_key(&directory.join("host_ed25519"))?;
-    let fingerprint = host_key
-        .public_key()
-        .fingerprint(HashAlg::Sha256)
-        .to_string();
-    let authorized = match &options.authorized_keys {
-        Some(path) => Some(Arc::new(authorized_keys(path)?)),
-        None => None,
-    };
-    let listener = TcpListener::bind((options.bind, options.port))
-        .await
-        .context("Could not bind the selected LAN SSH address")?;
-    let port = listener.local_addr()?.port();
-    let mut listeners = vec![listener];
-    if options.bind != Ipv4Addr::LOCALHOST {
-        listeners.push(
-            TcpListener::bind((Ipv4Addr::LOCALHOST, port))
-                .await
-                .context("Could not bind localhost SSH")?,
-        );
+pub struct SshListener {
+    pub port: u16,
+    pub fingerprint: String,
+    pub known_hosts: PathBuf,
+    listeners: Vec<TcpListener>,
+    options: SshOptions,
+    config: Arc<server::Config>,
+    authorized: Option<Arc<Vec<PublicKey>>>,
+}
+
+impl SshListener {
+    pub async fn bind(data_dir: &Path, options: SshOptions) -> Result<Self> {
+        options.validate()?;
+        // Host console environment flags must not remove remote voice/action colors.
+        crossterm::style::force_color_output(true);
+        let directory = data_dir.join("ssh");
+        paths::private_dir(&directory)?;
+        let host_key = host_key(&directory.join("host_ed25519"))?;
+        let fingerprint = host_key
+            .public_key()
+            .fingerprint(HashAlg::Sha256)
+            .to_string();
+        let authorized = match &options.authorized_keys {
+            Some(path) => Some(Arc::new(authorized_keys(path)?)),
+            None => None,
+        };
+        let listener = TcpListener::bind((options.bind, options.port))
+            .await
+            .context("Could not bind the selected LAN SSH address")?;
+        let port = listener.local_addr()?.port();
+        let mut listeners = vec![listener];
+        if options.bind != Ipv4Addr::LOCALHOST {
+            listeners.push(
+                TcpListener::bind((Ipv4Addr::LOCALHOST, port))
+                    .await
+                    .context("Could not bind localhost SSH")?,
+            );
+        }
+        let endpoints = listeners
+            .iter()
+            .map(TcpListener::local_addr)
+            .collect::<std::io::Result<Vec<_>>>()?;
+        let public = host_key.public_key().to_openssh()?;
+        let known_hosts = directory.join("known_hosts");
+        let lines = endpoints
+            .iter()
+            .map(|address| format!("[{}]:{} {public}\n", address.ip(), address.port()))
+            .collect::<String>();
+        paths::write_private(&known_hosts, lines.as_bytes(), false)?;
+        let config = Arc::new(server::Config {
+            keys: vec![host_key],
+            max_auth_attempts: 8,
+            auth_rejection_time: Duration::from_millis(200),
+            auth_rejection_time_initial: Some(Duration::ZERO),
+            window_size: 131_072,
+            maximum_packet_size: 32_768,
+            channel_buffer_size: 8,
+            event_buffer_size: 8,
+            inactivity_timeout: Some(Duration::from_secs(3600)),
+            keepalive_interval: Some(Duration::from_secs(30)),
+            keepalive_max: 3,
+            nodelay: true,
+            ..server::Config::default()
+        });
+        Ok(Self {
+            port,
+            fingerprint,
+            known_hosts,
+            listeners,
+            options,
+            config,
+            authorized,
+        })
     }
-    let endpoints = listeners
-        .iter()
-        .map(TcpListener::local_addr)
-        .collect::<std::io::Result<Vec<_>>>()?;
-    let public = host_key.public_key().to_openssh()?;
-    let known_hosts = directory.join("known_hosts");
-    let lines = endpoints
-        .iter()
-        .map(|address| format!("[{}]:{} {public}\n", address.ip(), address.port()))
-        .collect::<String>();
-    paths::write_private(&known_hosts, lines.as_bytes(), false)?;
-    let config = Arc::new(server::Config {
-        keys: vec![host_key],
-        max_auth_attempts: 8,
-        auth_rejection_time: Duration::from_millis(200),
-        auth_rejection_time_initial: Some(Duration::ZERO),
-        window_size: 131_072,
-        maximum_packet_size: 32_768,
-        channel_buffer_size: 8,
-        event_buffer_size: 8,
-        inactivity_timeout: Some(Duration::from_secs(3600)),
-        keepalive_interval: Some(Duration::from_secs(30)),
-        keepalive_max: 3,
-        nodelay: true,
-        ..server::Config::default()
-    });
-    let cancel = CancellationToken::new();
-    let counts = Arc::new(Mutex::new(HashMap::<IpAddr, usize>::new()));
-    let mut tasks = Vec::new();
-    for listener in listeners {
-        let game = handle.clone();
-        let options = options.clone();
-        let config = config.clone();
-        let authorized = authorized.clone();
-        let cancel = cancel.clone();
-        let counts = counts.clone();
-        tasks.push(tokio::spawn(async move {
-            accept_loop(listener, game, options, config, authorized, cancel, counts).await
-        }));
+
+    pub fn serve(self, handle: GameHandle) -> SshServer {
+        let Self {
+            port,
+            listeners,
+            options,
+            config,
+            authorized,
+            ..
+        } = self;
+        let cancel = CancellationToken::new();
+        let counts = Arc::new(Mutex::new(HashMap::<IpAddr, usize>::new()));
+        let mut tasks = Vec::new();
+        for listener in listeners {
+            let game = handle.clone();
+            let options = options.clone();
+            let config = config.clone();
+            let authorized = authorized.clone();
+            let cancel = cancel.clone();
+            let counts = counts.clone();
+            tasks.push(tokio::spawn(async move {
+                accept_loop(listener, game, options, config, authorized, cancel, counts).await
+            }));
+        }
+        SshServer {
+            port,
+            cancel,
+            tasks,
+        }
     }
-    Ok(SshServer {
-        port,
-        fingerprint,
-        known_hosts,
-        endpoints,
-        cancel,
-        tasks,
-    })
 }
 
 fn host_key(path: &Path) -> Result<PrivateKey> {

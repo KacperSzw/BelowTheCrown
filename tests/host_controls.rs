@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use below_the_crown::{
     codex::{DecisionDriver, ThinkRequest, ThinkResult},
     engine::Engine,
-    manager::{self, IpcServer, ManagerUi},
+    manager::{self, IpcServer, MenuUi, Page},
     model::CLOCK_RATE,
     paths,
     runtime::{GameHandle, HostInfo, RuntimeRequest},
@@ -65,9 +65,8 @@ impl Host {
         // Isolate host contracts from every tunable NPC cadence and model completion.
         simulation.scheduling.maximum_calls = 0;
         simulation.scheduling.background_interval = f64::MAX;
-        let ipc = IpcServer::open(directory.path(), handle.clone())
-            .await
-            .unwrap();
+        let mut ipc = IpcServer::bind(directory.path()).await.unwrap();
+        ipc.serve(handle.clone());
         let task = Some(tokio::spawn(simulation.run()));
         Self {
             directory,
@@ -197,6 +196,8 @@ async fn malformed_manager_parameters_do_not_mutate_or_stop_the_host() {
         ("settings", json!({"scenario":false})),
         ("settings", json!({"language":"de"})),
         ("settings", json!({"scenario":"missing-scenario"})),
+        ("settings", json!({"reasoningEffort":"ultra"})),
+        ("settings", json!({"reasoningEffort":null})),
         ("select", json!({"actorId":65_536})),
         ("load", json!({"name":"missing-save"})),
         ("new", json!({"seed":-1})),
@@ -237,9 +238,12 @@ async fn pending_settings_apply_on_new_or_restore_and_failed_restore_preserves_s
     host.request("save", json!({"name":"first-night"}))
         .await
         .unwrap();
-    host.request("settings", json!({"language":"pl","scenario":"siege"}))
-        .await
-        .unwrap();
+    host.request(
+        "settings",
+        json!({"language":"pl","scenario":"siege","reasoningEffort":"low"}),
+    )
+    .await
+    .unwrap();
     let settings: Value = serde_json::from_slice(
         &fs::read(host.directory.path().join("server-settings.json")).unwrap(),
     )
@@ -251,6 +255,7 @@ async fn pending_settings_apply_on_new_or_restore_and_failed_restore_preserves_s
     assert_eq!(view["scenarioId"], "castle");
     assert_eq!(view["pendingLanguage"], "pl");
     assert_eq!(view["pendingScenario"], "siege");
+    assert_eq!(view["settings"]["reasoningEffort"], "low");
     assert_eq!(host.export().await, original);
     assert!(
         host.request("load", json!({"name":"missing-save"}))
@@ -275,6 +280,7 @@ async fn pending_settings_apply_on_new_or_restore_and_failed_restore_preserves_s
     assert_eq!(view["scenarioId"], "castle");
     assert_eq!(view["language"], "pl");
     assert_eq!(view["manualPause"], true);
+    assert_eq!(view["effort"], "low");
     assert_eq!(
         host.export().await["world"]["players"],
         original["world"]["players"]
@@ -291,14 +297,18 @@ async fn settings_write_failure_preserves_pending_and_current_world() {
     std::os::unix::fs::symlink(&target, host.directory.path().join("server-settings.json"))
         .unwrap();
     assert!(
-        host.request("settings", json!({"language":"pl","scenario":"siege"}))
-            .await
-            .is_err()
+        host.request(
+            "settings",
+            json!({"language":"pl","scenario":"siege","reasoningEffort":"max"})
+        )
+        .await
+        .is_err()
     );
     assert_eq!(host.export().await, original);
     let view = host.view().await;
     assert_eq!(view["pendingLanguage"], "en");
     assert_eq!(view["pendingScenario"], "castle");
+    assert_eq!(view["settings"]["reasoningEffort"], "high");
     assert_eq!(
         fs::read(target).unwrap(),
         b"{\"language\":\"en\",\"scenario\":\"castle\"}"
@@ -412,7 +422,15 @@ async fn abandoned_join_releases_capacity_and_players_cannot_use_host_controls()
     assert_eq!(connected(&host.view().await), vec![player.actor_id]);
     assert!(host.handle.join(None, "Boris".into()).await.is_err());
     for method in [
-        "save", "load", "new", "settings", "pause", "observe", "stop", "export",
+        "save",
+        "load",
+        "new",
+        "settings",
+        "pause",
+        "observe",
+        "stop",
+        "export",
+        "diagnostics",
     ] {
         assert!(
             player.request(method, json!({})).await.is_err(),
@@ -514,9 +532,8 @@ async fn closing_a_manager_endpoint_does_not_stop_the_simulation_and_stop_saves_
         .request("listener", json!({"enabled":true}))
         .await
         .unwrap();
-    host.ipc = IpcServer::open(host.directory.path(), host.handle.clone())
-        .await
-        .unwrap();
+    host.ipc = IpcServer::bind(host.directory.path()).await.unwrap();
+    host.ipc.serve(host.handle.clone());
     host.finish().await;
     assert_eq!(player.views.borrow()["closed"], true);
     assert!(
@@ -572,7 +589,7 @@ async fn polling_the_remote_manager_cannot_slow_or_unpause_the_world_clock() {
 }
 
 #[tokio::test]
-async fn manager_render_remains_bounded_for_every_page_and_small_terminal() {
+async fn host_menu_render_remains_bounded_for_every_page_and_small_terminal() {
     let mut host = Host::new(2).await;
     let player = host.handle.join(None, "Ansel".into()).await.unwrap();
     host.request("select", json!({"actorId":player.actor_id}))
@@ -581,11 +598,11 @@ async fn manager_render_remains_bounded_for_every_page_and_small_terminal() {
     host.request("save", json!({"name":"fixture-save"}))
         .await
         .unwrap();
-    let mut ui = ManagerUi::default();
+    let mut ui = MenuUi::default();
     ui.set_view(host.view().await);
     for (width, height) in [(120, 40), (80, 24), (30, 8), (1, 1)] {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-        for page in 0..4 {
+        for page in Page::ALL {
             ui.page = page;
             for detail in 0..5 {
                 ui.detail = detail;
@@ -606,19 +623,14 @@ async fn manager_render_remains_bounded_for_every_page_and_small_terminal() {
 #[tokio::test]
 async fn a_second_ipc_server_cannot_replace_a_live_manager_endpoint() {
     let mut host = Host::new(1).await;
-    assert!(
-        IpcServer::open(host.directory.path(), host.handle.clone())
-            .await
-            .is_err()
-    );
+    assert!(IpcServer::bind(host.directory.path()).await.is_err());
     assert!(host.view().await.is_object());
     host.ipc.close().await;
     // A leftover non-listening socket can be cleaned up safely.
     let stale = std::os::unix::net::UnixListener::bind(&host.ipc.path).unwrap();
     drop(stale);
-    let replacement = IpcServer::open(host.directory.path(), host.handle.clone())
-        .await
-        .unwrap();
+    let mut replacement = IpcServer::bind(host.directory.path()).await.unwrap();
+    replacement.serve(host.handle.clone());
     // A second close and the old server's drop cannot unlink the new endpoint.
     host.ipc.close().await;
     assert!(host.view().await.is_object());

@@ -6,7 +6,7 @@ use below_the_crown::{
         WorkerSpec, safe_error,
     },
     engine::Engine,
-    model::{CLOCK_RATE, PLAYER, Tuning},
+    model::{CLOCK_RATE, MODEL, PLAYER, ReasoningEffort, Tuning},
     paths,
 };
 use futures::{StreamExt, stream};
@@ -191,6 +191,7 @@ async fn review_turn(
             identity: Some(engine.npc_identity(actor)?),
             input: observation["input"].clone(),
             listener: false,
+            reasoning_effort: ReasoningEffort::default(),
         };
         let cancel = CancellationToken::new();
         let started = std::time::Instant::now();
@@ -381,7 +382,7 @@ async fn npc_believability_live_scenarios() -> Result<()> {
             );
         }
     }
-    review.lock().expect("review").record(json!({"type":"configuration","model":"gpt-6-luna","effort":"high","serviceTier":"default","maximumDecisions":60,"initialUsed":used,"parallelEpisodes":3,"selection":selection,"worldClock":"controlled, no background inference","cli":cli}))?;
+    review.lock().expect("review").record(json!({"type":"configuration","model":MODEL,"effort":ReasoningEffort::default(),"serviceTier":"default","maximumDecisions":60,"initialUsed":used,"parallelEpisodes":3,"selection":selection,"worldClock":"controlled, no background inference","cli":cli}))?;
     let results = stream::iter(episodes)
         .filter(|(scenario, language, smoke)| {
             let actor = smoke.unwrap_or(match *scenario {
@@ -433,7 +434,7 @@ async fn npc_pacing_live_scenarios() -> Result<()> {
         .unwrap_or_else(|_| "19".into())
         .parse()?;
     let used = review.lock().expect("review").used;
-    review.lock().expect("review").record(json!({"type":"configuration","variant":variant,"seed":seed,"maximumDecisions":48,"initialUsed":used,"model":"gpt-6-luna","effort":"high","serviceTier":"default","worldClock":"controlled; physical steps executed; no background calls"}))?;
+    review.lock().expect("review").record(json!({"type":"configuration","variant":variant,"seed":seed,"maximumDecisions":48,"initialUsed":used,"model":MODEL,"effort":ReasoningEffort::default(),"serviceTier":"default","worldClock":"controlled; physical steps executed; no background calls"}))?;
     if std::env::var("BTC_LIVE_PERSONA_SMOKE").as_deref() == Ok("1") {
         let role = std::env::var("BTC_LIVE_SMOKE_ROLE")
             .ok()
@@ -612,6 +613,7 @@ async fn court_review_batch(
             identity: Some(engine.npc_identity(actor)?),
             input: observation["input"].clone(),
             listener: false,
+            reasoning_effort: ReasoningEffort::default(),
         };
         owners.insert(actor, (request.branch.clone(), request.token));
         pending.push(async move {
@@ -714,7 +716,7 @@ async fn npc_room_and_items_live_review() -> Result<()> {
     let probe = WorkerSpec::prepare(&root, &WorkerOptions::default())?
         .probe()
         .await?;
-    review.lock().expect("review").record(json!({"type":"configuration","maximumDecisions":24,"initialUsed":initial,"recheck":recheck,"model":"gpt-6-luna","effort":"high","serviceTier":"default","concurrentCourtTurns":if selected.is_some(){0}else{3},"backgroundInference":false,"cli":probe}))?;
+    review.lock().expect("review").record(json!({"type":"configuration","maximumDecisions":24,"initialUsed":initial,"recheck":recheck,"model":MODEL,"effort":ReasoningEffort::default(),"serviceTier":"default","concurrentCourtTurns":if selected.is_some(){0}else{3},"backgroundInference":false,"cli":probe}))?;
     let mut failures = Vec::new();
     for language in ["pl", "en"].into_iter().filter(|_| selected.is_none()) {
         for repeated in [false, true] {
@@ -1190,7 +1192,7 @@ async fn npc_natural_dialogue_live_review() -> Result<()> {
         review.lock().expect("review").used == 0,
         "Use this batch only with a fresh authorized ledger; consumed budgets must never reset"
     );
-    review.lock().expect("review").record(json!({"type":"configuration","model":"gpt-6-luna","effort":"high","serviceTier":"default","maximumDecisions":24,"baseCases":16,"maximumCorrections":8,"backgroundInference":false,"parallelScenes":2}))?;
+    review.lock().expect("review").record(json!({"type":"configuration","model":MODEL,"effort":ReasoningEffort::default(),"serviceTier":"default","maximumDecisions":24,"baseCases":16,"maximumCorrections":8,"backgroundInference":false,"parallelScenes":2}))?;
     let specs: Vec<_> = ["pl", "en"]
         .into_iter()
         .flat_map(|language| (0..8).map(move |case| (language, case)))

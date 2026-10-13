@@ -1,8 +1,13 @@
 //! Local host controls. The player transport remains SSH, including on the host.
 use crate::{
+    codex::DecisionDriver,
+    diagnostics::Failure,
+    host::{HostOptions, HostSession, Start},
     localization::tr,
+    model::ReasoningEffort,
     paths,
     runtime::GameHandle,
+    settings::HostSettings,
     ui::{self, AMBER, ASH, BLOOD, PALE, SAGE},
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -72,9 +77,10 @@ pub struct IpcServer {
     owns_socket: bool,
     cancel: CancellationToken,
     task: Option<JoinHandle<Result<()>>>,
+    listener: Option<UnixListener>,
 }
 impl IpcServer {
-    pub async fn open(directory: &Path, handle: GameHandle) -> Result<Self> {
+    pub async fn bind(directory: &Path) -> Result<Self> {
         let path = paths::manager_socket(directory)?;
         if let Ok(metadata) = fs::symlink_metadata(&path) {
             ensure!(
@@ -94,7 +100,19 @@ impl IpcServer {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
         let metadata = fs::symlink_metadata(&path)?;
         let cancel = CancellationToken::new();
-        let stopped = cancel.clone();
+        Ok(Self {
+            path,
+            inode: metadata.ino(),
+            device: metadata.dev(),
+            owns_socket: true,
+            cancel,
+            task: None,
+            listener: Some(listener),
+        })
+    }
+    pub fn serve(&mut self, handle: GameHandle) {
+        let listener = self.listener.take().expect("IPC listener already serving");
+        let stopped = self.cancel.clone();
         let task = tokio::spawn(async move {
             let permits = Arc::new(Semaphore::new(16));
             let mut clients = JoinSet::new();
@@ -109,16 +127,10 @@ impl IpcServer {
             while clients.join_next().await.is_some() {}
             Ok(())
         });
-        Ok(Self {
-            path,
-            inode: metadata.ino(),
-            device: metadata.dev(),
-            owns_socket: true,
-            cancel,
-            task: Some(task),
-        })
+        self.task = Some(task);
     }
     pub async fn close(&mut self) {
+        self.listener.take();
         self.cancel.cancel();
         if let Some(mut task) = self.task.take()
             && tokio::time::timeout(Duration::from_secs(2), &mut task)
@@ -317,24 +329,6 @@ pub fn networks() -> Result<Vec<Network>> {
     Ok(found)
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum Start {
-    #[default]
-    Resume,
-    New,
-    Save(String),
-}
-#[derive(Clone, Debug)]
-pub struct Setup {
-    pub language: String,
-    pub scenario: String,
-    pub network: Network,
-    pub max_agents: usize,
-    pub npc_update_rate: u8,
-    pub start: Start,
-    pub saves: Vec<String>,
-}
-
 type NativeTerminal = Terminal<CrosstermBackend<Stdout>>;
 struct Screen;
 impl Screen {
@@ -365,189 +359,6 @@ impl Drop for Screen {
     }
 }
 
-pub async fn setup(mut settings: Setup) -> Result<Setup> {
-    let (mut _screen, mut terminal) = Screen::open()?;
-    let mut events = EventStream::new();
-    let mut selected = 0usize;
-    let mut interfaces = networks()?;
-    if !interfaces.contains(&settings.network) {
-        interfaces.insert(0, settings.network.clone());
-    }
-    loop {
-        terminal.draw(|frame| {
-            let width = frame.area().width;
-            let title = ui::title(
-                usize::from(width),
-                usize::from(frame.area().height.saturating_sub(15)),
-                ui::local_braille_support(),
-            );
-            let top = (title.len() + usize::from(!title.is_empty())) as u16;
-            let areas = Layout::vertical([
-                Constraint::Length(top),
-                Constraint::Min(1),
-                Constraint::Length(2),
-            ])
-            .split(frame.area());
-            frame.render_widget(
-                Paragraph::new(
-                    title
-                        .into_iter()
-                        .map(|s| Line::styled(s, Style::default().fg(AMBER)))
-                        .collect::<Vec<_>>(),
-                ),
-                areas[0],
-            );
-            let rows = [
-                (
-                    tr(&settings.language, "Language", &[]),
-                    if settings.language == "pl" {
-                        "Polski".into()
-                    } else {
-                        "English".into()
-                    },
-                ),
-                (
-                    tr(&settings.language, "Scenario", &[]),
-                    scenario_name(&settings.scenario, &settings.language),
-                ),
-                (
-                    tr(&settings.language, "LAN interface", &[]),
-                    format!(
-                        "{} · {} · {}",
-                        settings.network.name, settings.network.address, settings.network.subnet
-                    ),
-                ),
-                (
-                    tr(&settings.language, "Castle", &[]),
-                    match &settings.start {
-                        Start::Resume => tr(&settings.language, "Resume", &[]),
-                        Start::New => tr(&settings.language, "New castle", &[]),
-                        Start::Save(name) => {
-                            format!("{} · {name}", tr(&settings.language, "Restore", &[]))
-                        }
-                    },
-                ),
-                (
-                    tr(&settings.language, "Maximum agents", &[]),
-                    settings.max_agents.to_string(),
-                ),
-                (
-                    tr(&settings.language, "NPC thinking rate", &[]),
-                    format!("{}×", settings.npc_update_rate),
-                ),
-                (tr(&settings.language, "Start", &[]), String::new()),
-            ];
-            let mut lines = Vec::new();
-            let mut selected_line = 0;
-            for (index, (label, value)) in rows.into_iter().enumerate() {
-                if index == selected {
-                    selected_line = lines.len() as u16;
-                }
-                let prefix = if index == selected { "› " } else { "  " };
-                lines.push(Line::styled(
-                    if width >= 50 {
-                        format!("{prefix}{label:<18} {value}")
-                    } else {
-                        format!("{prefix}{label}: {value}")
-                    },
-                    Style::default().fg(if index == selected { AMBER } else { PALE }),
-                ));
-                if areas[1].height >= 15 {
-                    lines.push(Line::from(""));
-                }
-            }
-            frame.render_widget(
-                Paragraph::new(lines).scroll((
-                    selected_line.saturating_sub(areas[1].height.saturating_sub(1)),
-                    0,
-                )),
-                areas[1],
-            );
-            frame.render_widget(
-                Paragraph::new(tr(
-                    &settings.language,
-                    "↑↓ select · ←→ change · Enter start · Esc leave",
-                    &[],
-                ))
-                .style(Style::default().fg(ASH)),
-                areas[2],
-            );
-        })?;
-        match events.next().await.context("Terminal closed")?? {
-            Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
-                KeyCode::Esc => bail!("Setup cancelled"),
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    bail!("Setup cancelled")
-                }
-                KeyCode::Up => selected = (selected + 6) % 7,
-                KeyCode::Down | KeyCode::Tab => selected = (selected + 1) % 7,
-                KeyCode::Enter => return Ok(settings),
-                KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') => {
-                    let reverse = key.code == KeyCode::Left;
-                    match selected {
-                        0 => {
-                            settings.language = if settings.language == "pl" {
-                                "en"
-                            } else {
-                                "pl"
-                            }
-                            .into()
-                        }
-                        1 => {
-                            settings.scenario = cycle(&scenario_ids(), &settings.scenario, reverse)
-                        }
-                        2 => {
-                            let index = interfaces
-                                .iter()
-                                .position(|n| *n == settings.network)
-                                .unwrap_or(0);
-                            settings.network = interfaces[(index
-                                + if reverse { interfaces.len() - 1 } else { 1 })
-                                % interfaces.len()]
-                            .clone();
-                        }
-                        3 => {
-                            settings.start = cycle_start(&settings.start, &settings.saves, reverse);
-                        }
-                        4 => {
-                            settings.max_agents = if reverse {
-                                settings.max_agents.saturating_sub(1).max(1)
-                            } else {
-                                (settings.max_agents + 1).min(32)
-                            }
-                        }
-                        5 => {
-                            settings.npc_update_rate =
-                                cycle_npc_rate(settings.npc_update_rate, reverse)
-                        }
-                        _ => return Ok(settings),
-                    }
-                }
-                _ => {}
-            },
-            _ => {}
-        }
-    }
-}
-fn cycle_npc_rate(current: u8, reverse: bool) -> u8 {
-    let rates = [1, 5, 15];
-    let index = rates.iter().position(|rate| *rate == current).unwrap_or(1);
-    rates[(index + if reverse { 2 } else { 1 }) % rates.len()]
-}
-
-fn cycle(options: &[String], current: &str, reverse: bool) -> String {
-    let index = options.iter().position(|s| s == current).unwrap_or(0);
-    options[(index + if reverse { options.len() - 1 } else { 1 }) % options.len()].clone()
-}
-fn cycle_start(current: &Start, saves: &[String], reverse: bool) -> Start {
-    let mut options = vec![Start::Resume, Start::New];
-    options.extend(saves.iter().cloned().map(Start::Save));
-    let index = options
-        .iter()
-        .position(|choice| choice == current)
-        .unwrap_or(0);
-    options[(index + if reverse { options.len() - 1 } else { 1 }) % options.len()].clone()
-}
 pub fn scenario_name(id: &str, language: &str) -> String {
     crate::content::available_scenarios()
         .into_iter()
@@ -562,21 +373,73 @@ fn scenario_ids() -> Vec<String> {
         .collect()
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Page {
+    #[default]
+    Home,
+    Settings,
+    Saves,
+    Diagnostics,
+    Admin,
+}
+impl Page {
+    pub const ALL: [Self; 5] = [
+        Self::Home,
+        Self::Settings,
+        Self::Saves,
+        Self::Diagnostics,
+        Self::Admin,
+    ];
+    fn title(self) -> &'static str {
+        match self {
+            Self::Home => "Home",
+            Self::Settings => "Settings",
+            Self::Saves => "Saves",
+            Self::Diagnostics => "Diagnostics",
+            Self::Admin => "Admin",
+        }
+    }
+}
+
 #[derive(Default)]
-pub struct ManagerUi {
+pub struct MenuOptions {
+    pub overrides: Value,
+    pub host: HostOptions,
+    pub start: Start,
+    pub audio: bool,
+    pub attach_only: bool,
+}
+
+#[derive(Default)]
+pub struct MenuUi {
     pub view: Value,
-    pub page: usize,
+    pub settings: HostSettings,
+    pub page: Page,
     pub selected: usize,
     pub save_selected: usize,
     pub detail: usize,
     pub scroll: u16,
     pub message: String,
+    pub active: bool,
+    pub owns_host: bool,
+    pub report: Value,
+    pub failure: Option<Failure>,
+    pub busy: String,
+    pub networks: Vec<Network>,
+    pub efforts: Vec<ReasoningEffort>,
+    directory: PathBuf,
+    home_selected: usize,
+    setting_selected: usize,
+    show_details: bool,
+    config_valid: bool,
     save_draft: Option<ui::Draft>,
     confirm_new: bool,
+    confirm_stop: bool,
 }
-impl ManagerUi {
+impl MenuUi {
     fn language(&self) -> &str {
-        self.view["language"].as_str().unwrap_or("en")
+        &self.settings.language
     }
     fn text(&self, text: &str) -> String {
         tr(self.language(), text, &[])
@@ -594,108 +457,158 @@ impl ManagerUi {
             .unwrap_or(&[])
     }
     pub fn set_view(&mut self, view: Value) {
+        if let Some(settings) = view.get("settings") {
+            match serde_json::from_value::<HostSettings>(settings.clone()) {
+                Ok(settings) => self.settings = settings,
+                Err(error) => self.fail(anyhow::Error::from(error)),
+            }
+        } else {
+            // A host started before the upgrade may keep running; only its existing controls are usable.
+            let mut patch = json!({});
+            for (target, source) in [
+                ("language", "pendingLanguage"),
+                ("scenario", "pendingScenario"),
+                ("maxAgents", "maxAgents"),
+                ("npcUpdateRate", "npcUpdateRate"),
+            ] {
+                if let Some(value) = view.get(source) {
+                    patch[target] = value.clone();
+                }
+            }
+            if let Ok(settings) = self.settings.patched(&patch) {
+                self.settings = settings;
+            }
+        }
+        if let Some(efforts) = view.get("supportedEfforts")
+            && let Ok(efforts) = serde_json::from_value(efforts.clone())
+        {
+            self.efforts = efforts;
+        }
         self.view = view;
         self.selected = self.selected.min(self.actors().len().saturating_sub(1));
         self.save_selected = self.save_selected.min(self.saves().len().saturating_sub(1));
+    }
+    fn fail(&mut self, error: anyhow::Error) {
+        let failure = Failure::from_error(&error);
+        self.message = self.text(&failure.summary);
+        self.failure = Some(failure);
+        self.page = Page::Diagnostics;
+        self.scroll = 0;
+    }
+    fn home_actions(&self) -> [&'static str; 7] {
+        [
+            if self.active && self.view["manualPause"] == true {
+                "Resume and play"
+            } else {
+                "Play"
+            },
+            "New game",
+            "Settings",
+            "Saves",
+            "Diagnostics",
+            "Admin",
+            if self.owns_host {
+                "Save and stop"
+            } else {
+                "Quit"
+            },
+        ]
     }
     pub fn render(&self, frame: &mut Frame) {
         let area = frame.area();
         let title = ui::title(
             usize::from(area.width),
-            usize::from(area.height.saturating_sub(10)),
+            usize::from(area.height.saturating_sub(13)),
             ui::local_braille_support(),
         );
-        let top = title.len() as u16 + 3;
+        let top = (title.len() as u16 + 3).min(area.height.saturating_sub(3));
         let areas = Layout::vertical([
             Constraint::Length(top),
             Constraint::Min(1),
-            Constraint::Length(4),
+            Constraint::Length(3),
         ])
         .split(area);
         let mut header = title
             .into_iter()
-            .map(|s| Line::styled(s, Style::default().fg(AMBER)))
+            .map(|line| Line::styled(line, Style::default().fg(AMBER)))
             .collect::<Vec<_>>();
-        header.push(Line::from(vec![
-            Span::styled(self.text("Private inspection"), Style::default().fg(AMBER)),
-            Span::raw(format!(
-                " · {} · {} · {} / {}",
-                string(&self.view, "clock"),
-                scenario_name(string(&self.view, "scenarioId"), self.language()),
-                string(&self.view, "model"),
-                string(&self.view, "effort")
-            )),
-        ]));
-        let pages = ["Overview", "People", "Saves", "Settings"];
+        header.push(Line::styled(
+            if self.active {
+                format!(
+                    "{} · {} · {}",
+                    self.text("Running game"),
+                    string(&self.view, "clock"),
+                    scenario_name(string(&self.view, "scenarioId"), self.language())
+                )
+            } else {
+                self.text("Ready to start")
+            },
+            Style::default().fg(AMBER),
+        ));
         header.push(Line::from(
-            pages
+            Page::ALL
                 .iter()
                 .enumerate()
-                .map(|(i, page)| {
+                .map(|(index, page)| {
                     Span::styled(
-                        format!(" {} {} ", i + 1, self.text(page)),
-                        Style::default().fg(if i == self.page { AMBER } else { ASH }),
+                        format!(" {} {} ", index + 1, self.text(page.title())),
+                        Style::default().fg(if *page == self.page { AMBER } else { ASH }),
                     )
                 })
                 .collect::<Vec<_>>(),
         ));
-        header.push(Line::styled(
-            self.view["paused"]
-                .as_array()
-                .map(|v| {
-                    v.iter()
-                        .filter_map(Value::as_str)
-                        .map(|s| self.text(s))
-                        .collect::<Vec<_>>()
-                        .join(" · ")
-                })
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| self.text("Running")),
-            Style::default().fg(ASH),
-        ));
-        frame.render_widget(Paragraph::new(header), areas[0]);
-        match self.page {
-            0 => self.overview(frame, areas[1]),
-            1 => self.people(frame, areas[1]),
-            2 => self.save_page(frame, areas[1]),
-            _ => self.settings(frame, areas[1]),
+        if !self.busy.is_empty() {
+            header.push(Line::styled(
+                self.text(&self.busy),
+                Style::default().fg(SAGE),
+            ));
+        } else {
+            header.push(Line::styled(
+                self.view["paused"]
+                    .as_array()
+                    .map(|v| {
+                        v.iter()
+                            .filter_map(Value::as_str)
+                            .map(|s| self.text(s))
+                            .collect::<Vec<_>>()
+                            .join(" · ")
+                    })
+                    .unwrap_or_default(),
+                Style::default().fg(ASH),
+            ));
         }
-        let metrics = &self.view["metrics"];
-        let percent = |key: &str| {
-            metrics[key]
-                .as_f64()
-                .map(|n| format!("{:.1}s", n / 1000.))
-                .unwrap_or_else(|| "—".into())
+        frame.render_widget(Paragraph::new(header).wrap(Wrap { trim: false }), areas[0]);
+        match self.page {
+            Page::Home => self.home(frame, areas[1]),
+            Page::Settings => self.settings_page(frame, areas[1]),
+            Page::Saves => self.save_page(frame, areas[1]),
+            Page::Diagnostics => self.diagnostics_page(frame, areas[1]),
+            Page::Admin => {
+                if self.active {
+                    self.people(frame, areas[1]);
+                } else {
+                    frame.render_widget(
+                        Paragraph::new(
+                            self.text("Start a game to inspect its people and use Admin controls."),
+                        )
+                        .wrap(Wrap { trim: false }),
+                        areas[1],
+                    );
+                }
+            }
+        }
+        let help = match self.page {
+            Page::Home => "↑↓ select · Enter open · Tab page · q quit",
+            Page::Settings => "↑↓ select · ←→ change · Tab page · Esc home",
+            Page::Saves => "↑↓ save · Enter restore · s save · Esc home",
+            Page::Diagnostics => "Enter run checks · d details · r retry · Esc home",
+            Page::Admin => "↑↓ person · ←→ detail · p pause · o observe · r recover · Esc home",
         };
         let footer = vec![
-            Line::styled(
-                format!(
-                    "{} {}/{} · {} {} · {} {} · p50 {} / p95 {}",
-                    self.text("Thinking"),
-                    metrics["active"],
-                    self.view["maxAgents"].as_u64().unwrap_or(5),
-                    metrics["calls"],
-                    self.text("calls"),
-                    metrics["tokens"],
-                    self.text("tokens"),
-                    percent("p50"),
-                    percent("p95")
-                ),
-                Style::default().fg(ASH),
-            ),
-            Line::styled(
-                self.text(
-                    "c connect player · p pause · o observe · s save · n new · r recover · q leave",
-                ),
-                Style::default().fg(ASH),
-            ),
+            Line::styled(self.text(help), Style::default().fg(ASH)),
             Line::styled(
                 ui::clean(&self.message, false),
-                Style::default().fg(if self.view["error"].is_null() {
-                    SAGE
-                } else {
-                    BLOOD
-                }),
+                Style::default().fg(if self.failure.is_some() { BLOOD } else { SAGE }),
             ),
         ];
         frame.render_widget(Paragraph::new(footer).wrap(Wrap { trim: false }), areas[2]);
@@ -714,14 +627,308 @@ impl ManagerUi {
             self.modal(
                 frame,
                 &format!(
-                    "{} · {} · {}\n{}",
-                    self.text("New castle"),
-                    scenario_name(string(&self.view, "pendingScenario"), self.language()),
-                    string(&self.view, "pendingLanguage"),
+                    "{} · {}\n{}",
+                    self.text("New game"),
+                    scenario_name(&self.settings.scenario, self.language()),
                     self.text("Enter start · Esc cancel. Connected players must rejoin.")
                 ),
             );
         }
+        if self.confirm_stop {
+            self.modal(
+                frame,
+                &format!(
+                    "{}\n{}",
+                    self.text("Save and stop this game for every connected player?"),
+                    self.text("Enter stop · Esc cancel")
+                ),
+            );
+        }
+    }
+    fn home(&self, frame: &mut Frame, area: Rect) {
+        let mut lines = self
+            .home_actions()
+            .iter()
+            .enumerate()
+            .map(|(index, label)| {
+                Line::styled(
+                    format!(
+                        "{} {}",
+                        if index == self.home_selected {
+                            "›"
+                        } else {
+                            " "
+                        },
+                        self.text(label)
+                    ),
+                    Style::default().fg(if index == self.home_selected {
+                        AMBER
+                    } else {
+                        PALE
+                    }),
+                )
+            })
+            .collect::<Vec<_>>();
+        if self.active {
+            lines.push(Line::from(""));
+            lines.push(Line::raw(format!(
+                "{}: {}",
+                self.text("Connected"),
+                self.actors()
+                    .iter()
+                    .filter(|actor| actor["connected"] == true)
+                    .count()
+            )));
+            lines.push(Line::raw(format!(
+                "{}: {}",
+                self.text("LAN join command"),
+                string(&self.view["ssh"], "command")
+            )));
+            if self.view["settings"].is_null() {
+                lines.push(Line::styled(self.text("This game uses an older version. Save and restart it when ready to use the new settings."),Style::default().fg(ASH)));
+            }
+        }
+        frame.render_widget(
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .scroll((self.scroll, 0)),
+            area,
+        );
+    }
+    fn settings_page(&self, frame: &mut Frame, area: Rect) {
+        let network = self.settings.bind.map_or_else(
+            || self.text("Automatic LAN interface"),
+            |bind| {
+                self.networks
+                    .iter()
+                    .find(|network| network.address == bind)
+                    .map_or_else(
+                        || format!("{} · {bind}", self.text("Unavailable")),
+                        |network| {
+                            format!(
+                                "{} · {} · {}",
+                                network.name, network.address, network.subnet
+                            )
+                        },
+                    )
+            },
+        );
+        let values = [
+            (
+                "Language",
+                if self.settings.language == "pl" {
+                    "Polski".into()
+                } else {
+                    "English".into()
+                },
+            ),
+            (
+                "Scenario",
+                scenario_name(&self.settings.scenario, self.language()),
+            ),
+            (
+                "Luna reasoning effort",
+                self.settings.reasoning_effort.as_str().into(),
+            ),
+            ("Maximum agents", self.settings.max_agents.to_string()),
+            (
+                "NPC thinking rate",
+                format!("{}×", self.settings.npc_update_rate),
+            ),
+            ("LAN interface", network),
+            ("SSH port", self.settings.port.to_string()),
+            ("Maximum players", self.settings.max_players.to_string()),
+        ];
+        let mut lines = values
+            .into_iter()
+            .enumerate()
+            .map(|(index, (label, value))| {
+                Line::styled(
+                    format!(
+                        "{} {}: {value}",
+                        if index == self.setting_selected {
+                            "›"
+                        } else {
+                            " "
+                        },
+                        self.text(label)
+                    ),
+                    Style::default().fg(if index == self.setting_selected {
+                        AMBER
+                    } else {
+                        PALE
+                    }),
+                )
+            })
+            .collect::<Vec<_>>();
+        lines.push(Line::from(""));
+        for text in [
+            "Effort, agent limit and NPC rate apply to the next decisions.",
+            "Language and scenario apply to a new or restored castle.",
+            "Network and player limits apply to the next host launch.",
+            "NPCs use Luna at standard speed.",
+        ] {
+            lines.push(Line::styled(self.text(text), Style::default().fg(ASH)));
+        }
+        if self.efforts.is_empty() {
+            lines.push(Line::styled(
+                self.text("Run Diagnostics to discover available Luna efforts."),
+                Style::default().fg(ASH),
+            ));
+        }
+        frame.render_widget(
+            Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((
+                self.setting_selected
+                    .saturating_sub(area.height.saturating_sub(1) as usize) as u16,
+                0,
+            )),
+            area,
+        );
+    }
+    fn setting_patch(&self, reverse: bool) -> Result<Value> {
+        let settings = &self.settings;
+        ensure!(
+            !self.active
+                || !self.view["settings"].is_null()
+                || matches!(self.setting_selected, 0 | 1 | 3 | 4),
+            "This running host is an older version. Save and restart it when ready to use the new settings."
+        );
+        Ok(match self.setting_selected {
+            0 => json!({"language":if settings.language=="pl"{"en"}else{"pl"}}),
+            1 => json!({"scenario":cycle(&scenario_ids(),&settings.scenario,reverse)}),
+            2 => {
+                ensure!(
+                    !self.efforts.is_empty(),
+                    "Run Diagnostics to discover the supported Luna reasoning efforts"
+                );
+                ensure!(
+                    !self.active || !self.view["settings"].is_null(),
+                    "This running host is an older version and cannot change reasoning effort. Save and restart it when ready."
+                );
+                json!({"reasoningEffort":cycle(&self.efforts,&settings.reasoning_effort,reverse)})
+            }
+            3 => {
+                json!({"maxAgents":if reverse{settings.max_agents.saturating_sub(1).max(1)}else{settings.max_agents.saturating_add(1).min(HostSettings::MAX_AGENTS)}})
+            }
+            4 => {
+                json!({"npcUpdateRate":cycle(&HostSettings::NPC_UPDATE_RATES,&settings.npc_update_rate,reverse)})
+            }
+            5 => {
+                ensure!(
+                    !self.networks.is_empty(),
+                    "Cannot enumerate LAN interfaces; retry Diagnostics"
+                );
+                let index = self
+                    .networks
+                    .iter()
+                    .position(|network| Some(network.address) == settings.bind);
+                let index =
+                    index.map_or(if reverse { self.networks.len() - 1 } else { 0 }, |index| {
+                        (index + if reverse { self.networks.len() - 1 } else { 1 })
+                            % self.networks.len()
+                    });
+                let network = &self.networks[index];
+                json!({"bind":network.address,"subnet":network.subnet})
+            }
+            6 => {
+                json!({"port":if reverse{settings.port.saturating_sub(1).max(1)}else{settings.port.saturating_add(1)}})
+            }
+            _ => {
+                json!({"maxPlayers":if reverse{settings.max_players.saturating_sub(1).max(1)}else{settings.max_players.saturating_add(1).min(HostSettings::MAX_PLAYERS)}})
+            }
+        })
+    }
+    fn diagnostics_page(&self, frame: &mut Frame, area: Rect) {
+        let mut lines = vec![Line::styled(
+            self.text("Startup and connection checks"),
+            Style::default().fg(AMBER),
+        )];
+        if let Some(failure) = &self.failure {
+            lines.push(Line::from(""));
+            lines.push(Line::styled(
+                self.text(&failure.summary),
+                Style::default().fg(BLOOD),
+            ));
+            lines.push(Line::raw(self.text(&failure.action)));
+            if self.show_details {
+                lines.push(Line::from(""));
+                lines.push(Line::raw(format!(
+                    "{}: {}",
+                    self.text("Details"),
+                    ui::clean(&failure.details, false)
+                )));
+            }
+            lines.push(Line::from(""));
+        }
+        if self.report.is_null() {
+            lines.push(Line::raw(self.text(
+                "Run checks to verify Codex login, isolation and Luna availability.",
+            )));
+        } else {
+            for (label, key) in [
+                ("Native Codex", "codex"),
+                ("Sandbox", "sandbox"),
+                ("Model", "model"),
+                ("Reasoning effort", "effort"),
+                ("Isolation", "isolation"),
+            ] {
+                let value = if key == "effort" {
+                    self.settings.reasoning_effort.as_str()
+                } else {
+                    string(&self.report, key)
+                };
+                lines.push(Line::raw(format!(
+                    "{}: {}",
+                    self.text(label),
+                    self.text(value)
+                )));
+            }
+            lines.push(Line::raw(format!(
+                "{}: {}",
+                self.text("Available efforts"),
+                self.efforts
+                    .iter()
+                    .map(|effort| effort.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
+        if self.active {
+            lines.push(Line::from(""));
+            let local_command =
+                crate::player::LocalConnection::from_view(&self.directory, &self.view)
+                    .and_then(|connection| connection.command())
+                    .unwrap_or_else(crate::codex::safe_error);
+            for (label, command) in [
+                ("LAN join command", string(&self.view["ssh"], "command")),
+                ("Local join command", local_command.as_str()),
+            ] {
+                lines.push(Line::raw(format!("{}: {}", self.text(label), command)));
+            }
+            let metrics = &self.view["metrics"];
+            lines.push(Line::raw(format!(
+                "{}: {} / {} · {}: {} · {}: {}",
+                self.text("Thinking"),
+                metrics["active"],
+                self.settings.max_agents,
+                self.text("calls"),
+                metrics["calls"],
+                self.text("tokens"),
+                metrics["tokens"]
+            )));
+            if let Some(error) = self.view["error"].as_str() {
+                lines.push(Line::styled(
+                    ui::clean(error, false),
+                    Style::default().fg(BLOOD),
+                ));
+            }
+        }
+        frame.render_widget(
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .scroll((self.scroll, 0)),
+            area,
+        );
     }
     fn modal(&self, frame: &mut Frame, text: &str) {
         let area = frame.area();
@@ -741,111 +948,12 @@ impl ManagerUi {
             rect,
         );
     }
-    fn overview(&self, frame: &mut Frame, area: Rect) {
-        let mut lines = vec![
-            Line::styled(self.text("Join with SSH"), Style::default().fg(AMBER)),
-            Line::styled(
-                string(&self.view["ssh"], "command").to_owned(),
-                Style::default().fg(PALE),
-            ),
-            Line::from(""),
-        ];
-        let actors = self.actors();
-        let connected = actors.iter().filter(|a| a["connected"] == true).count();
-        lines.push(Line::styled(
-            format!("{}: {connected}", self.text("Connected")),
-            Style::default().fg(SAGE),
-        ));
-        lines.push(Line::from(""));
-        for (kind, title) in [("npc", "NPC"), ("listener", "Speech interpretation")] {
-            let metrics = &self.view["metrics"][kind];
-            let median = |field: &str| {
-                metrics[field]["p50"]
-                    .as_f64()
-                    .map(|ms| format!("{:.2}s", ms / 1000.))
-                    .unwrap_or_else(|| "—".into())
-            };
-            lines.push(Line::styled(
-                format!(
-                    "{}: {} {} · {}",
-                    self.text(title),
-                    metrics["calls"],
-                    self.text("calls"),
-                    self.text("Queue / inference / cleanup / total (p50)")
-                ),
-                Style::default().fg(ASH),
-            ));
-            lines.push(Line::raw(format!(
-                "{} / {} / {} / {}",
-                median("queueMs"),
-                median("inferenceMs"),
-                median("cleanupMs"),
-                median("totalMs")
-            )));
-            lines.push(Line::raw(format!(
-                "{}: {} · {}: {} · {}: {}",
-                self.text("Cancellations"),
-                metrics["cancellations"],
-                self.text("Rejected decisions"),
-                metrics["rejections"],
-                self.text("Failed plan steps"),
-                metrics["executionFailures"]
-            )));
-        }
-        lines.push(Line::from(""));
-        let mut rooms = std::collections::BTreeMap::<String, Vec<&Value>>::new();
-        for actor in actors {
-            rooms
-                .entry(string(actor, "room").into())
-                .or_default()
-                .push(actor);
-        }
-        for (room, people) in rooms {
-            lines.push(Line::styled(
-                format!("{room} · {}", people.len()),
-                Style::default().fg(AMBER),
-            ));
-            lines.push(Line::from(
-                people
-                    .iter()
-                    .map(|actor| {
-                        Span::styled(
-                            format!(
-                                "  {}{}",
-                                string(actor, "name"),
-                                if actor["connected"] == true {
-                                    " ●"
-                                } else {
-                                    ""
-                                }
-                            ),
-                            Style::default()
-                                .fg(ui::actor_color(actor["id"].as_u64().unwrap_or(0) as u16, 0)),
-                        )
-                    })
-                    .collect::<Vec<_>>(),
-            ));
-            lines.push(Line::from(""));
-        }
-        if let Some(error) = self.view["error"].as_str() {
-            lines.push(Line::styled(
-                ui::clean(error, false),
-                Style::default().fg(BLOOD),
-            ));
-        }
-        frame.render_widget(
-            Paragraph::new(lines)
-                .wrap(Wrap { trim: false })
-                .scroll((self.scroll, 0)),
-            area,
-        );
-    }
     fn people(&self, frame: &mut Frame, area: Rect) {
         let list_height = (self.actors().len() as u16 + 2).min(area.height / 2).max(1);
         let parts =
             Layout::vertical([Constraint::Length(list_height), Constraint::Min(1)]).split(area);
         let mut rows = vec![Line::styled(
-            self.text("↑↓ person · Tab detail · PgUp/PgDn scroll"),
+            self.text("↑↓ person · ←→ detail · PgUp/PgDn scroll"),
             Style::default().fg(ASH),
         )];
         let start = self
@@ -1059,82 +1167,385 @@ impl ManagerUi {
         }
         frame.render_widget(Paragraph::new(rows).scroll((self.scroll, 0)), area);
     }
-    fn settings(&self, frame: &mut Frame, area: Rect) {
-        let rows = vec![
-            Line::styled(
-                format!(
-                    "{}: {}",
-                    self.text("Language"),
-                    string(&self.view, "pendingLanguage")
-                ),
-                Style::default().fg(AMBER),
-            ),
-            Line::styled(
-                format!(
-                    "{}: {}",
-                    self.text("Scenario"),
-                    scenario_name(string(&self.view, "pendingScenario"), self.language())
-                ),
-                Style::default().fg(AMBER),
-            ),
-            Line::from(""),
-            Line::styled(
-                format!(
-                    "{}: {}",
-                    self.text("Maximum agents"),
-                    self.view["maxAgents"]
-                ),
-                Style::default().fg(AMBER),
-            ),
-            Line::styled(
-                format!(
-                    "{}: {}×",
-                    self.text("NPC thinking rate"),
-                    self.view["npcUpdateRate"]
-                ),
-                Style::default().fg(AMBER),
-            ),
-            Line::raw(
-                self.text("l language · ←→ scenario · [ ] agents · , . NPC rate · n new castle"),
-            ),
-            Line::from(""),
-            Line::styled(
-                self.text("Language applies when starting or restoring a castle."),
-                Style::default().fg(ASH),
-            ),
-            Line::from(""),
-            Line::raw(self.text("One game day = one real hour. Pauses freeze the world.")),
-            Line::raw(self.text(
-                "NPC rate changes passive thinking; conversations and danger react immediately.",
-            )),
-            Line::raw(self.text("NPCs use Luna/high at standard speed.")),
-            Line::raw(
-                self.text("Agent limit applies immediately, including speech interpretation."),
-            ),
-            Line::raw(self.text("Sound is local to this manager; SSH stays silent.")),
-        ];
-        frame.render_widget(Paragraph::new(rows).wrap(Wrap { trim: false }), area);
-    }
+
     fn movement(&mut self, up: bool) -> Option<u16> {
         self.scroll = 0;
-        if self.page == 1 {
-            let len = self.actors().len();
-            if len > 0 {
-                self.selected = (self.selected + if up { len - 1 } else { 1 }) % len;
+        let step = |current: usize, len: usize| (current + if up { len - 1 } else { 1 }) % len;
+        match self.page {
+            Page::Home => self.home_selected = step(self.home_selected, self.home_actions().len()),
+            Page::Settings => self.setting_selected = step(self.setting_selected, 8),
+            Page::Admin if !self.actors().is_empty() => {
+                self.selected = step(self.selected, self.actors().len());
                 return self.actors()[self.selected]["id"]
                     .as_u64()
-                    .map(|n| n as u16);
+                    .map(|id| id as u16);
             }
-        } else if self.page == 2 {
-            let len = self.saves().len();
-            if len > 0 {
-                self.save_selected = (self.save_selected + if up { len - 1 } else { 1 }) % len;
+            Page::Saves if !self.saves().is_empty() => {
+                self.save_selected = step(self.save_selected, self.saves().len())
             }
+            _ => {}
         }
         None
     }
 }
 
+fn cycle<T: Clone + PartialEq>(options: &[T], current: &T, reverse: bool) -> T {
+    let index = options
+        .iter()
+        .position(|option| option == current)
+        .unwrap_or(0);
+    options[(index + if reverse { options.len() - 1 } else { 1 }) % options.len()].clone()
+}
+
+enum MenuResult {
+    Attached(Option<Value>),
+    Started(Box<HostSession>),
+    Checked(Value),
+    Updated(Value, bool),
+}
+
+async fn probe(directory: &Path) -> Result<Option<Value>> {
+    match UnixStream::connect(paths::manager_socket(directory)?).await {
+        Ok(stream) => {
+            drop(stream);
+            request(directory, "view", json!({})).await.map(Some)
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn start_job(
+    directory: &Path,
+    settings: &HostSettings,
+    start: Start,
+    options: &HostOptions,
+) -> JoinHandle<Result<MenuResult>> {
+    let directory = directory.to_owned();
+    let settings = settings.clone();
+    let options = options.clone();
+    tokio::spawn(async move {
+        if let Some(view) = probe(&directory).await? {
+            return Ok(MenuResult::Attached(Some(view)));
+        }
+        Ok(MenuResult::Started(Box::new(
+            HostSession::start(&directory, &settings, &start, &options).await?,
+        )))
+    })
+}
+
+fn check_job(
+    directory: &Path,
+    settings: &HostSettings,
+    options: &HostOptions,
+    link: Option<Link>,
+) -> JoinHandle<Result<MenuResult>> {
+    let directory = directory.to_owned();
+    let settings = settings.clone();
+    let options = options.worker.clone();
+    tokio::spawn(async move {
+        if let Some(link) = link {
+            return Ok(MenuResult::Checked(
+                link.request("diagnostics", json!({})).await?,
+            ));
+        }
+        let worker = crate::diagnostics::prepare(
+            &directory,
+            &settings.scenario,
+            &settings.language,
+            options,
+            settings.reasoning_effort,
+        )
+        .await?;
+        let report = worker.report.clone();
+        worker.driver.reset().await;
+        Ok(MenuResult::Checked(report))
+    })
+}
+
+fn operation_job(
+    link: Link,
+    method: &'static str,
+    params: Value,
+    launch: bool,
+) -> JoinHandle<Result<MenuResult>> {
+    tokio::spawn(async move {
+        let result = link.request(method, params).await?;
+        ensure!(result["ok"] != false, "{}", string(&result, "message"));
+        Ok(MenuResult::Updated(
+            link.request("view", json!({})).await?,
+            launch,
+        ))
+    })
+}
+
+fn play(ui: &mut MenuUi, directory: &Path) {
+    match crate::player::launch(directory, &ui.view) {
+        Ok(true) => ui.message = ui.text("Player window requested. Choose your name there."),
+        Ok(false) => match crate::player::LocalConnection::from_view(directory, &ui.view)
+            .and_then(|connection| connection.command())
+        {
+            Ok(command) => {
+                ui.failure = Some(Failure {
+                    summary: "A separate player window is unavailable.".into(),
+                    action: "Open another terminal and run the local join command in Details."
+                        .into(),
+                    details: command,
+                });
+                ui.page = Page::Diagnostics;
+                ui.show_details = true;
+                ui.message = ui.text("Connection instructions are shown in Diagnostics.");
+            }
+            Err(error) => ui.fail(error),
+        },
+        Err(error) => ui.fail(error),
+    }
+}
+
+pub async fn run(directory: &Path, options: MenuOptions) -> Result<()> {
+    let (_screen, mut terminal) = Screen::open()?;
+    let mut events = EventStream::new();
+    let mut ticker = tokio::time::interval(Duration::from_millis(250));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut ui = MenuUi {
+        directory: directory.into(),
+        ..Default::default()
+    };
+    let mut overrides = if options.overrides.is_null() {
+        json!({})
+    } else {
+        options.overrides
+    };
+    match HostSettings::load_with_overrides(directory, &overrides) {
+        Ok(settings) => {
+            ui.settings = settings;
+            ui.config_valid = true;
+        }
+        Err(error) => ui.fail(error.context(format!(
+            "Cannot read server-settings.json in {}",
+            directory.display()
+        ))),
+    }
+    match networks() {
+        Ok(networks) => ui.networks = networks,
+        Err(error) => ui.fail(error),
+    }
+    match crate::host::idle_view(directory, &ui.settings) {
+        Ok(view) => ui.set_view(view),
+        Err(error) => ui.fail(error),
+    }
+    let mut sound = Audio::new(directory, options.audio)?;
+    let mut session: Option<Box<HostSession>> = None;
+    let mut link: Option<Link> = None;
+    let initial_directory = directory.to_owned();
+    let mut pending = Some(tokio::spawn(async move {
+        Ok(MenuResult::Attached(probe(&initial_directory).await?))
+    }));
+    let mut poll: Option<JoinHandle<Result<Value>>> = None;
+    ui.busy = "Looking for a running game…".into();
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let result:Result<()>=async {
+    loop {
+        if pending.as_ref().is_some_and(|job|job.is_finished()) {
+            let result=pending.take().unwrap().await.context("Menu action stopped")?;
+            ui.busy.clear();
+            match result {
+                Ok(MenuResult::Attached(Some(view)))=> {
+                    ui.failure=None;
+                    ui.active=true;ui.set_view(view);ui.config_valid=true;link=Some(Link::Remote(directory.into()));
+                    ui.message=ui.text("Connected to the existing host. Play opens your player window.");
+                }
+                Ok(MenuResult::Attached(None))=> {
+                    if options.attach_only {ui.fail(anyhow::anyhow!("No host is running for {}. Start it with below-the-crown.",directory.display()));}
+                    else if options.host.import_snapshot.is_some()&&ui.config_valid {pending=Some(start_job(directory,&ui.settings,options.start.clone(),&options.host));ui.busy="Starting the game…".into();}
+                }
+                Ok(MenuResult::Started(owned))=> {
+                    let view=owned.handle.request("view",json!({})).await?;
+                    ui.report=owned.report.clone();ui.active=true;ui.owns_host=true;ui.set_view(view);
+                    ui.efforts=serde_json::from_value(ui.report["supportedEfforts"].clone()).unwrap_or_default();
+                    link=Some(Link::Local(owned.handle.clone()));session=Some(owned);ui.page=Page::Home;ui.home_selected=0;ui.failure=None;
+                    play(&mut ui,directory);
+                }
+                Ok(MenuResult::Checked(report))=> {
+                    ui.efforts=serde_json::from_value(report["supportedEfforts"].clone()).unwrap_or_default();
+                    let validation=crate::diagnostics::require_effort(&report);
+                    ui.report=report;
+                    match validation { Ok(())=>{ui.failure=None;ui.message=ui.text("Startup checks passed. Play is ready.");}, Err(error)=>ui.fail(error) }
+                    if let Ok(networks)=networks(){ui.networks=networks;}
+                }
+                Ok(MenuResult::Updated(view,launch))=> {
+                    ui.failure=None;ui.set_view(view);ui.config_valid=true;ui.message=ui.text("Done.");
+                    if launch {play(&mut ui,directory);}
+                }
+                Err(error)=>ui.fail(error),
+            }
+        }
+        if poll.as_ref().is_some_and(|job|job.is_finished()) {
+            match poll.take().unwrap().await.context("Host refresh stopped")? {
+                Ok(view)=>ui.set_view(view),
+                Err(error)=>{ui.fail(error);link=None;ui.active=false;}
+            }
+        }
+        if session.as_ref().is_some_and(|host|host.is_finished()) {
+            let mut owned=session.take().unwrap();
+            if let Err(error)=owned.close().await {ui.fail(error);}
+            link=None;ui.active=false;ui.owns_host=false;
+        }
+        terminal.draw(|frame|ui.render(frame))?;
+        sound.tick();
+        let event=tokio::select! {
+            _=terminate.recv()=>break,
+            _=ticker.tick()=> {
+                if let Some(current)=&link&&poll.is_none()&&pending.is_none(){let current=current.clone();poll=Some(tokio::spawn(async move{current.view().await}));}
+                continue;
+            },
+            event=events.next()=>event.context("Terminal closed")??,
+        };
+        let key=match event {
+            Event::Key(key) if key.kind!=KeyEventKind::Release=>key,
+            Event::Paste(text)=>{if let Some(draft)=ui.save_draft.as_mut(){draft.insert(&text);}continue;},
+            _=>continue,
+        };
+        let quit=key.modifiers.contains(KeyModifiers::CONTROL)&&key.code==KeyCode::Char('c')||key.code==KeyCode::Char('q')&&ui.save_draft.is_none()&&!ui.confirm_new;
+        if quit&&!ui.confirm_stop {
+            if ui.owns_host {ui.confirm_stop=true;}else {break;}
+            continue;
+        }
+        if ui.confirm_stop {
+            match key.code {KeyCode::Enter=>break,KeyCode::Esc=>ui.confirm_stop=false,_=>{}}
+            continue;
+        }
+        if let Some(mut draft)=ui.save_draft.take() {
+            match key.code {
+                KeyCode::Esc=>{},
+                KeyCode::Enter if pending.is_none()=>{if let Some(current)=&link{pending=Some(operation_job(current.clone(),"save",json!({"name":draft.text.trim()}),false));ui.busy="Saving the castle…".into();}},
+                _=>{edit(&mut draft,key);ui.save_draft=Some(draft);}
+            }
+            continue;
+        }
+        if ui.confirm_new {
+            match key.code {
+                KeyCode::Esc=>ui.confirm_new=false,
+                KeyCode::Enter if pending.is_none()=> {
+                    ui.confirm_new=false;
+                    if let Some(current)=&link{pending=Some(operation_job(current.clone(),"new",json!({"seed":seed()}),false));}
+                    else if ui.config_valid&&!options.attach_only {pending=Some(start_job(directory,&ui.settings,Start::New,&options.host));}
+                    ui.busy="Starting a new castle…".into();ui.page=Page::Home;
+                }
+                _=>{}
+            }
+            continue;
+        }
+        match key.code {
+            KeyCode::Char('1'..='5')=>{if let KeyCode::Char(c)=key.code{ui.page=Page::ALL[(c as usize)-('1' as usize)];ui.scroll=0;}},
+            KeyCode::Tab=>{ui.page=cycle(&Page::ALL,&ui.page,key.modifiers.contains(KeyModifiers::SHIFT));ui.scroll=0;},
+            KeyCode::Esc=>{ui.page=Page::Home;ui.scroll=0;},
+            KeyCode::Up|KeyCode::Down=> {
+                if let Some(id)=ui.movement(key.code==KeyCode::Up)&&pending.is_none()&&let Some(current)=&link{pending=Some(operation_job(current.clone(),"select",json!({"actorId":id}),false));}
+            }
+            KeyCode::PageUp=>ui.scroll=ui.scroll.saturating_sub(8),
+            KeyCode::PageDown=>ui.scroll=ui.scroll.saturating_add(8),
+            KeyCode::Char('d')=>{ui.page=Page::Diagnostics;ui.show_details = !ui.show_details;},
+            KeyCode::Left|KeyCode::Right if ui.page==Page::Admin=>{ui.detail=(ui.detail+if key.code==KeyCode::Left{4}else{1})%5;ui.scroll=0;},
+            KeyCode::Left|KeyCode::Right if ui.page==Page::Settings&&pending.is_none()=> {
+                match ui.setting_patch(key.code==KeyCode::Left) {
+                    Ok(patch)=> {
+                        if let Some(current)=&link {pending=Some(operation_job(current.clone(),"settings",patch,false));}
+                        else {
+                            for (key,value) in patch.as_object().unwrap(){overrides[key]=value.clone();}
+                            let directory=directory.to_owned();let saved_overrides=overrides.clone();
+                            pending=Some(tokio::spawn(async move{let settings=HostSettings::load_with_overrides(&directory,&saved_overrides)?;settings.save(&directory)?;Ok(MenuResult::Updated(crate::host::idle_view(&directory,&settings)?,false))}));
+                        }
+                        ui.busy="Applying settings…".into();
+                    }
+                    Err(error)=>ui.fail(error),
+                }
+            }
+            KeyCode::Enter if ui.page==Page::Home&&pending.is_none()=> {
+                match ui.home_selected {
+                    0=> {
+                        if let Some(current)=&link {
+                            if ui.view["manualPause"]==true {pending=Some(operation_job(current.clone(),"pause",json!({"paused":false}),true));}
+                            else {play(&mut ui,directory);}
+                        } else if ui.config_valid&&!options.attach_only {pending=Some(start_job(directory,&ui.settings,options.start.clone(),&options.host));ui.busy="Checking login, model and network…".into();}
+                        else {ui.page=Page::Diagnostics;ui.message=ui.text("Correct the startup problem and retry Diagnostics before playing.");}
+                    }
+                    1=> {if ui.config_valid&&(ui.active||!options.attach_only){ui.confirm_new=true;}else{ui.page=Page::Diagnostics;}},
+                    2=>ui.page=Page::Settings,
+                    3=>ui.page=Page::Saves,
+                    4=>ui.page=Page::Diagnostics,
+                    5=>ui.page=Page::Admin,
+                    _=>{if ui.owns_host{ui.confirm_stop=true;}else{break;}}
+                }
+            }
+            KeyCode::Enter if ui.page==Page::Saves&&pending.is_none()=> {
+                if let Some(save)=ui.saves().get(ui.save_selected) {
+                    let name=string(save,"name").to_owned();
+                    if let Some(current)=&link {pending=Some(operation_job(current.clone(),"load",json!({"name":name}),false));}
+                    else if ui.config_valid&&!options.attach_only{pending=Some(start_job(directory,&ui.settings,Start::Save(name),&options.host));}
+                    ui.busy="Restoring the castle…".into();
+                }
+            }
+            KeyCode::Char('s') if ui.page==Page::Saves&&ui.active=>{let mut draft=ui::Draft::default();draft.set("quicksave".into());ui.save_draft=Some(draft);},
+            KeyCode::Char('p') if ui.page==Page::Admin&&pending.is_none()=>{if let Some(current)=&link{pending=Some(operation_job(current.clone(),"pause",json!({"paused":!ui.view["manualPause"].as_bool().unwrap_or(false)}),false));}},
+            KeyCode::Char('o') if ui.page==Page::Admin&&pending.is_none()=>{if let Some(current)=&link{pending=Some(operation_job(current.clone(),"observe",json!({"enabled":!ui.view["observing"].as_bool().unwrap_or(false)}),false));}},
+            KeyCode::Char('r') if ui.page==Page::Admin&&pending.is_none()=>{if let Some(current)=&link{pending=Some(operation_job(current.clone(),"recover",json!({}),false));}},
+            KeyCode::Enter|KeyCode::Char('r') if ui.page==Page::Diagnostics&&pending.is_none()=> {
+                if !ui.config_valid {
+                    match HostSettings::load_with_overrides(directory,&overrides){Ok(settings)=>{ui.settings=settings;ui.config_valid=true;},Err(error)=>{ui.fail(error);continue;}}
+                }
+                let current=if ui.view["settings"].is_object(){link.clone()}else{None};
+                pending=Some(check_job(directory,&ui.settings,&options.host,current));ui.busy="Checking Codex login and model…".into();
+            }
+            _=>{}
+        }
+        if ui.page==Page::Settings&&ui.efforts.is_empty()&&pending.is_none()&&ui.failure.is_none() {
+            let current=if ui.view["settings"].is_object(){link.clone()}else{None};
+            pending=Some(check_job(directory,&ui.settings,&options.host,current));ui.busy="Discovering Luna reasoning efforts…".into();
+        }
+        if pending.is_some()&&let Some(job)=poll.take(){job.abort();let _=job.await;}
+    }
+    Ok(())
+    }.await;
+    let pending_closed = close_pending(pending).await;
+    if let Some(job) = poll {
+        job.abort();
+        let _ = job.await;
+    }
+    let closed = if let Some(mut owned) = session {
+        owned.close().await
+    } else {
+        Ok(())
+    };
+    result?;
+    pending_closed?;
+    closed
+}
+
+async fn close_pending(pending: Option<JoinHandle<Result<MenuResult>>>) -> Result<()> {
+    if let Some(job) = pending {
+        job.abort();
+        if let Ok(Ok(MenuResult::Started(mut host))) = job.await {
+            host.close().await?;
+        }
+    }
+    Ok(())
+}
+
+pub fn seed() -> u32 {
+    (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u32)
+        .max(1)
+}
 fn string<'a>(value: &'a Value, key: &str) -> &'a str {
     value[key].as_str().unwrap_or("")
 }
@@ -1167,250 +1578,6 @@ fn edit(draft: &mut ui::Draft, key: KeyEvent) {
         KeyCode::End => draft.boundary(true),
         _ => {}
     }
-}
-
-pub async fn run(link: Link, directory: &Path, owns_host: bool, audio: bool) -> Result<()> {
-    let (_screen, mut terminal) = Screen::open()?;
-    let mut events = EventStream::new();
-    let mut ticker = tokio::time::interval(Duration::from_millis(250));
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut ui = ManagerUi::default();
-    ui.set_view(link.view().await?);
-    let mut sound = Audio::new(directory, audio)?;
-    loop {
-        terminal.draw(|frame| ui.render(frame))?;
-        sound.tick();
-        let key = tokio::select! {_=ticker.tick()=>{ui.set_view(link.view().await?);continue;},event=events.next()=>match event.context("Terminal closed")??{Event::Key(key) if key.kind!=KeyEventKind::Release=>key,Event::Paste(text)=>{if let Some(draft)=ui.save_draft.as_mut(){draft.insert(&text);}continue;},_=>continue}};
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            if owns_host {
-                link.request("stop", json!({})).await?;
-            }
-            break;
-        }
-        let operation = if let Some(mut draft) = ui.save_draft.take() {
-            match key.code {
-                KeyCode::Esc => None,
-                KeyCode::Enter => Some(("save", json!({"name":draft.text.trim()}))),
-                _ => {
-                    edit(&mut draft, key);
-                    ui.save_draft = Some(draft);
-                    None
-                }
-            }
-        } else if ui.confirm_new {
-            match key.code {
-                KeyCode::Esc => {
-                    ui.confirm_new = false;
-                    None
-                }
-                KeyCode::Enter => {
-                    ui.confirm_new = false;
-                    Some(("new", json!({"seed":seed()})))
-                }
-                _ => None,
-            }
-        } else {
-            match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => {
-                    if owns_host {
-                        link.request("stop", json!({})).await?;
-                    }
-                    break;
-                }
-                KeyCode::Char('1'..='4') => {
-                    if let KeyCode::Char(c) = key.code {
-                        ui.page = (c as usize) - ('1' as usize);
-                        ui.scroll = 0;
-                    }
-                    None
-                }
-                KeyCode::Up | KeyCode::Down => ui
-                    .movement(key.code == KeyCode::Up)
-                    .map(|id| ("select", json!({"actorId":id}))),
-                KeyCode::Tab => {
-                    if ui.page == 1 {
-                        ui.detail = (ui.detail + 1) % 5;
-                        ui.scroll = 0;
-                    } else {
-                        ui.page = (ui.page + 1) % 4;
-                    }
-                    None
-                }
-                KeyCode::PageUp => {
-                    ui.scroll = ui.scroll.saturating_sub(8);
-                    None
-                }
-                KeyCode::PageDown => {
-                    ui.scroll = ui.scroll.saturating_add(8);
-                    None
-                }
-                KeyCode::Char('p') => Some((
-                    "pause",
-                    json!({"paused":!ui.view["manualPause"].as_bool().unwrap_or_else(||ui.view["paused"].as_array().is_some_and(|v|v.iter().any(|s|s=="Paused")))}),
-                )),
-                KeyCode::Char('o') => Some((
-                    "observe",
-                    json!({"enabled":!ui.view["observing"].as_bool().unwrap_or(false)}),
-                )),
-                KeyCode::Char('r') => Some(("recover", json!({}))),
-                KeyCode::Char('s') => {
-                    let mut draft = ui::Draft::default();
-                    draft.set("quicksave".into());
-                    ui.save_draft = Some(draft);
-                    None
-                }
-                KeyCode::Char('n') => {
-                    ui.confirm_new = true;
-                    None
-                }
-                KeyCode::Enter if ui.page == 2 => ui
-                    .saves()
-                    .get(ui.save_selected)
-                    .map(|save| ("load", json!({"name":save["name"]}))),
-                KeyCode::Char('l') if ui.page == 3 => Some((
-                    "settings",
-                    json!({"language":if ui.view["pendingLanguage"]=="pl"{"en"}else{"pl"}}),
-                )),
-                KeyCode::Left | KeyCode::Right if ui.page == 3 => Some((
-                    "settings",
-                    json!({"scenario":cycle(&scenario_ids(),string(&ui.view,"pendingScenario"),key.code==KeyCode::Left)}),
-                )),
-                KeyCode::Char('[') | KeyCode::Char(']') if ui.page == 3 => Some((
-                    "settings",
-                    json!({"maxAgents": if key.code == KeyCode::Char('[') { ui.view["maxAgents"].as_u64().unwrap_or(5).saturating_sub(1).max(1) } else { (ui.view["maxAgents"].as_u64().unwrap_or(5) + 1).min(32) }}),
-                )),
-                KeyCode::Char(',') | KeyCode::Char('.') if ui.page == 3 => Some((
-                    "settings",
-                    json!({"npcUpdateRate":cycle_npc_rate(ui.view["npcUpdateRate"].as_u64().unwrap_or(5) as u8,key.code==KeyCode::Char(','))}),
-                )),
-                KeyCode::Char('c') => {
-                    ui.message = match launch_player(directory, &ui.view) {
-                        Ok(true) => ui.text("Player terminal opened."),
-                        Ok(false) => format!(
-                            "{}: {}",
-                            ui.text("Connect player"),
-                            string(&ui.view["ssh"], "localCommand")
-                        ),
-                        Err(error) => crate::codex::safe_error(error),
-                    };
-                    None
-                }
-                _ => None,
-            }
-        };
-        if let Some((method, params)) = operation {
-            ui.message = match link.request(method, params).await {
-                Ok(answer) => {
-                    if answer["ok"] == false {
-                        ui::clean(string(&answer, "message"), false)
-                    } else {
-                        tr(ui.language(), "Done.", &[])
-                    }
-                }
-                Err(error) => crate::codex::safe_error(error),
-            };
-            ui.set_view(link.view().await?);
-        }
-    }
-    Ok(())
-}
-
-pub fn seed() -> u32 {
-    (std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as u32)
-        .max(1)
-}
-
-fn launch_player(directory: &Path, view: &Value) -> Result<bool> {
-    let Some(ssh) = paths::find_executable("ssh") else {
-        return Ok(false);
-    };
-    let Some(terminal) = ["kitty", "foot", "gnome-terminal", "xterm"]
-        .iter()
-        .find_map(|name| paths::find_executable(name))
-    else {
-        return Ok(false);
-    };
-    if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
-        return Ok(false);
-    }
-    let port = view["ssh"]["port"]
-        .as_u64()
-        .context("No SSH port")?
-        .to_string();
-    let known = directory.join("ssh/known_hosts");
-    let mut args = Vec::<std::ffi::OsString>::new();
-    match terminal.file_name().and_then(|s| s.to_str()) {
-        Some("kitty") => args.extend(["--title".into(), "Below the Crown · player".into()]),
-        Some("gnome-terminal") => args.push("--".into()),
-        Some("xterm") => args.push("-e".into()),
-        _ => {}
-    }
-    args.extend([
-        ssh.into_os_string(),
-        "-tt".into(),
-        "-p".into(),
-        port.into(),
-        "-o".into(),
-        format!("UserKnownHostsFile={}", known.display()).into(),
-        "-o".into(),
-        "StrictHostKeyChecking=yes".into(),
-        "127.0.0.1".into(),
-    ]);
-    let child = if let (Some(launcher), Some(workspace)) = (
-        paths::find_executable("workstation-desktop"),
-        native_workspace(),
-    ) {
-        Command::new(launcher)
-            .args(["launch", "--workspace", &workspace, "--background", "--"])
-            .arg(&terminal)
-            .args(&args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?
-    } else {
-        Command::new(&terminal)
-            .args(&args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?
-    };
-    // Reap only the launcher we created; the player terminal manages its own SSH session.
-    std::thread::spawn(move || {
-        let mut child = child;
-        let _ = child.wait();
-    });
-    Ok(true)
-}
-
-fn native_workspace() -> Option<String> {
-    let hyprctl = paths::find_executable("hyprctl")?;
-    let result = Command::new(hyprctl)
-        .args(["clients", "-j"])
-        .output()
-        .ok()?;
-    let clients: Value = serde_json::from_slice(&result.stdout).ok()?;
-    let mut pid = std::process::id();
-    let mut parents = HashSet::new();
-    for _ in 0..24 {
-        parents.insert(u64::from(pid));
-        let text = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        pid = text
-            .rsplit_once(") ")?
-            .1
-            .split_whitespace()
-            .nth(1)?
-            .parse()
-            .ok()?;
-        if pid == 0 {
-            break;
-        }
-    }
-    clients.as_array()?.iter().find(|client|client["pid"].as_u64().is_some_and(|p|parents.contains(&p)))?["workspace"]["id"].as_i64().map(|id|id.to_string())
 }
 
 struct Audio {
@@ -1465,30 +1632,47 @@ mod tests {
     #[test]
     fn menus_wrap_in_both_directions() {
         let values = vec!["a".into(), "b".into(), "c".into()];
-        assert_eq!(cycle(&values, "a", true), "c");
-        assert_eq!(cycle(&values, "c", false), "a");
-        let mut ui = ManagerUi {
-            page: 1,
+        assert_eq!(cycle(&values, &"a".to_owned(), true), "c");
+        assert_eq!(cycle(&values, &"c".to_owned(), false), "a");
+        assert_eq!(cycle(&Page::ALL, &Page::Home, true), Page::Admin);
+        let mut ui = MenuUi {
+            page: Page::Admin,
             ..Default::default()
         };
         ui.set_view(json!({"actors":[{"id":10},{"id":11},{"id":12}]}));
         assert_eq!(ui.movement(true), Some(12));
         assert_eq!(ui.movement(false), Some(10));
-        let saves = vec!["new".into(), "resume".into()];
+    }
+    #[test]
+    fn shared_editor_emits_valid_patches_and_only_advertised_efforts() {
+        let mut ui = MenuUi {
+            efforts: vec![ReasoningEffort::Low, ReasoningEffort::High],
+            ..Default::default()
+        };
+        ui.setting_selected = 2;
         assert_eq!(
-            cycle_start(&Start::New, &saves, false),
-            Start::Save("new".into())
+            ui.setting_patch(false).unwrap(),
+            json!({"reasoningEffort":"low"})
         );
-        assert_eq!(
-            cycle_start(&Start::Resume, &saves, true),
-            Start::Save("resume".into())
-        );
+        ui.efforts.clear();
+        assert!(ui.setting_patch(false).is_err());
+        ui.setting_selected = 3;
+        ui.settings.max_agents = 1;
+        assert_eq!(ui.setting_patch(true).unwrap(), json!({"maxAgents":1}));
+        ui.setting_selected = 6;
+        ui.settings.port = u16::MAX;
+        assert_eq!(ui.setting_patch(false).unwrap(), json!({"port":u16::MAX}));
+        ui.active = true;
+        ui.view = json!({});
+        ui.setting_selected = 2;
+        ui.efforts = ReasoningEffort::ALL.into();
+        assert!(ui.setting_patch(false).is_err());
     }
     #[test]
     fn discovered_networks_have_real_private_subnets() {
-        let networks = networks().unwrap();
-        assert!(!networks.is_empty());
-        for network in networks {
+        let values = networks().unwrap();
+        assert!(!values.is_empty());
+        for network in values {
             assert!(network.subnet.contains(&network.address));
             assert!(
                 network.address.is_private()
@@ -1498,8 +1682,34 @@ mod tests {
         }
     }
     #[tokio::test]
+    async fn quitting_awaits_cleanup_of_a_completed_pending_startup() {
+        let directory = tempfile::tempdir().unwrap();
+        let host = HostSession::fixture(directory.path()).await;
+        let port = host.handle.info.port;
+        let handle = host.handle.clone();
+        let job = tokio::spawn(async move { Ok(MenuResult::Started(Box::new(host))) });
+        while !job.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        close_pending(Some(job)).await.unwrap();
+        assert!(handle.request("view", json!({})).await.is_err());
+        assert!(!directory.path().join("server.json").exists());
+        assert!(!paths::manager_socket(directory.path()).unwrap().exists());
+        assert!(
+            crate::store::Store::open(directory.path())
+                .unwrap()
+                .saves()
+                .unwrap()
+                .contains(&"autosave".into())
+        );
+        let _released_port = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
+            .await
+            .unwrap();
+        let _released_lock = paths::lock_server(directory.path()).unwrap();
+    }
+    #[tokio::test]
     async fn ipc_frames_are_bounded_and_unicode_safe() {
-        let mut valid = BufReader::new(&b"{\"name\":\"\xc5\x81ucja\"}\n"[..]);
+        let mut valid = BufReader::new("{\"name\":\"Łucja\"}\n".as_bytes());
         let value: Value = serde_json::from_slice(&frame(&mut valid, 80).await.unwrap()).unwrap();
         assert_eq!(value["name"], "Łucja");
         let mut too_big = BufReader::new(&b"123456789\n"[..]);
@@ -1508,16 +1718,111 @@ mod tests {
         assert!(frame(&mut truncated, 20).await.is_err());
     }
     #[test]
-    fn manager_renders_without_clipping_panics() {
+    fn diagnostics_use_the_same_local_connection_for_an_older_host() {
+        let directory = Path::new("/tmp/old-castle");
+        let view = json!({"ssh":{"port":2281,"localCommand":"obsolete unpinned command"}});
+        let ui = MenuUi {
+            directory: directory.into(),
+            active: true,
+            page: Page::Diagnostics,
+            view: view.clone(),
+            ..Default::default()
+        };
+        let expected = crate::player::LocalConnection::from_view(directory, &view)
+            .unwrap()
+            .command()
+            .unwrap();
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 32)).unwrap();
+        terminal.draw(|frame| ui.render(frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        // Word wrapping adds padding between command arguments across screen rows.
+        let visible = screen.split_whitespace().collect::<Vec<_>>().join(" ");
+        let expected = expected.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(visible.contains(&expected), "{visible}");
+        assert!(!screen.contains("obsolete unpinned command"));
+    }
+    #[test]
+    fn diagnostics_show_current_effort_after_a_settings_update() {
+        let mut ui = MenuUi {
+            page: Page::Diagnostics,
+            report: json!({"effort":"high","model":crate::model::MODEL}),
+            ..Default::default()
+        };
+        let settings = HostSettings {
+            reasoning_effort: ReasoningEffort::Low,
+            ..Default::default()
+        };
+        ui.set_view(json!({"settings":settings}));
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 32)).unwrap();
+        terminal.draw(|frame| ui.render(frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(screen.contains("Reasoning effort: low"));
+        assert!(!screen.contains("Reasoning effort: high"));
+    }
+    #[test]
+    fn every_menu_state_and_page_stays_bounded_in_both_languages() {
         use ratatui::backend::TestBackend;
-        let mut ui = ManagerUi::default();
-        ui.set_view(json!({"language":"pl","model":"gpt-6-luna","effort":"high","actors":[],"saves":[],"metrics":{"active":0,"calls":0,"tokens":0}}));
-        for (width, height) in [(12, 4), (80, 24), (160, 50)] {
-            for page in 0..4 {
-                ui.page = page;
-                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                terminal.draw(|frame| ui.render(frame)).unwrap();
+        for language in ["en", "pl"] {
+            for active in [false, true] {
+                let mut ui = MenuUi {
+                    active,
+                    settings: HostSettings {
+                        language: language.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                ui.set_view(
+                    json!({"actors":[],"saves":[],"metrics":{"active":0,"calls":0,"tokens":0}}),
+                );
+                for state in 0..3 {
+                    ui.busy = if state == 1 {
+                        "Starting the game…".into()
+                    } else {
+                        String::new()
+                    };
+                    ui.failure = if state == 2 {
+                        Some(Failure::from_details(
+                            "Could not bind localhost SSH: Address already in use",
+                        ))
+                    } else {
+                        None
+                    };
+                    for (width, height) in [(1, 1), (12, 4), (30, 8), (80, 24), (160, 50)] {
+                        for page in Page::ALL {
+                            ui.page = page;
+                            let mut terminal =
+                                Terminal::new(TestBackend::new(width, height)).unwrap();
+                            terminal.draw(|frame| ui.render(frame)).unwrap();
+                            assert_eq!(
+                                terminal.backend().buffer().area,
+                                Rect::new(0, 0, width, height)
+                            );
+                        }
+                    }
+                }
             }
         }
+    }
+    #[tokio::test]
+    async fn probe_never_replaces_an_idle_endpoint() {
+        let directory = tempfile::tempdir().unwrap();
+        assert!(probe(directory.path()).await.unwrap().is_none());
+        let server = IpcServer::bind(directory.path()).await.unwrap();
+        let path = server.path.clone();
+        drop(server);
+        assert!(!path.exists());
     }
 }

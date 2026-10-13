@@ -92,8 +92,10 @@ Physical doors, locks and actual actions apply in both travel directions.
 The worker's private root contains only its runtime and isolated credentials.
 Host state, sockets, other minds and local integrations are outside it. Only the
 expected recall tool is accepted. Player speech interpreters receive a physical
-view with no NPC identity, journal, private memories or tools. GPT-6 Luna/high
-uses standard service tier; global Codex fast mode does not alter game calls.
+view with no NPC identity, journal, private memories or tools. GPT-6 Luna uses
+the host-selected provider-advertised reasoning effort (default high) and standard
+service tier; global Codex fast mode does not alter game calls. The scheduler
+snapshots effort into each decision, so changes preserve in-flight work and NPC threads.
 The manager retains the most recent failure with time and phase (inference,
 decision validation or plan execution), separately from the current status,
 including across a retry and successful correction. Diagnostics stay private.
