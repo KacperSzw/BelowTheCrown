@@ -566,32 +566,7 @@ impl Simulation {
     }
     fn launch_listener(&mut self, message: Message) -> Result<()> {
         let actor = message.actor;
-        let full = self.player_view(actor)?;
-        let mut view = json!({});
-        for field in [
-            "self",
-            "room",
-            "doors",
-            "actors",
-            "items",
-            "inventory",
-            "actions",
-            "combat",
-            "map",
-            "language",
-            "time",
-        ] {
-            if let Some(value) = full.get(field) {
-                view[field] = value.clone();
-            }
-        }
-        if let Some(own) = view["self"].as_object_mut() {
-            own.remove("portraitKey");
-        }
-        // Command discovery includes blocked doors; model suggestions stay executable.
-        if let Some(actions) = view["actions"].as_array_mut() {
-            actions.retain(|action| action["available"].as_bool() != Some(false));
-        }
+        let view = self.engine.listener_view(actor)?;
         let mut allowed = HashSet::from([actor]);
         gather_ids(&view, &mut allowed);
         let id = self.next();
@@ -717,22 +692,24 @@ impl Simulation {
                 status.tokens += result.tokens;
                 status.latency = Some(result.latency_ms);
                 if job.listener {
-                    let parsed = crate::model::Interpretation::parse(result.decision.clone());
+                    let parsed = result.decision.listener().cloned();
                     match parsed {
                         Ok(interpretation) => {
                             let plan = json!(interpretation.plan);
-                            if referenced_ids(&plan)
+                            if interpretation
+                                .plan
                                 .iter()
-                                .any(|id| !job.allowed.contains(id))
+                                .flat_map(crate::model::Intent::entity_ids)
+                                .any(|id| !job.allowed.contains(&id))
                             {
                                 Err(anyhow::anyhow!(
                                     "The listener referred to something outside your visible world"
                                 ))
                             } else {
                                 let message = job.message.as_ref().unwrap();
-                                let accepted = self.engine.start_player_plan(
+                                let accepted = self.engine.start_interpreted_plan(
                                     job.actor,
-                                    result.decision.clone(),
+                                    interpretation.clone(),
                                     message.event_id,
                                     job.combat.clone(),
                                 )?;
@@ -749,8 +726,15 @@ impl Simulation {
                     evidence.extend(result.recalled);
                     evidence.sort_unstable();
                     evidence.dedup();
-                    self.engine
-                        .apply_decision(job.actor, result.decision, job.version, &evidence)
+                    match result.decision.npc() {
+                        Ok(decision) => self.engine.apply_npc_decision(
+                            job.actor,
+                            decision.clone(),
+                            job.version,
+                            &evidence,
+                        ),
+                        Err(error) => Err(error),
+                    }
                 }
             }
             Err(error) => Err(error),
@@ -1415,12 +1399,6 @@ fn gather_ids(value: &Value, ids: &mut HashSet<u16>) {
         _ => {}
     }
 }
-fn referenced_ids(value: &Value) -> HashSet<u16> {
-    let mut ids = HashSet::new();
-    gather_ids(value, &mut ids);
-    ids
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1471,7 +1449,7 @@ mod tests {
     fn decision(plan: Value) -> ThinkResult {
         ThinkResult {
             model_output: None,
-            decision: json!({"summary":"A controlled intention.","goals":[],"plan":plan,"memories":[],"relationships":[],"acceptPlots":[]}),
+            decision: crate::codex::DecisionResponse::Npc(crate::model::Decision::parse(json!({"summary":"A controlled intention.","goals":[],"plan":plan,"memories":[],"relationships":[],"acceptPlots":[]})).unwrap()),
             tokens: 10,
             latency_ms: 100.,
             cleanup_ms: 0.,
@@ -1960,7 +1938,7 @@ mod tests {
                     assert_eq!(request.input["text"], "Who runs this room?");
                     reply.send(Ok(ThinkResult {
             model_output: None,
-                        decision: json!({"summary":"A question with no physical action.","plan":[]}),
+                        decision: crate::codex::DecisionResponse::Listener(crate::model::Interpretation::parse(json!({"summary":"A question with no physical action.","plan":[]})).unwrap()),
                         tokens: 10,
                         latency_ms: 100.,
                         cleanup_ms: 0.,
@@ -2239,7 +2217,9 @@ mod tests {
             .as_u64()
             .unwrap();
         let mut result = decision(json!([{"kind":"wait","seconds":1800}]));
-        result.decision["relationships"] = json!([{"targetId":player.actor_id,"trust":1,"affection":0,"fear":0,"respect":0,"evidenceIds":[evidence]}]);
+        if let crate::codex::DecisionResponse::Npc(decision) = &mut result.decision {
+            decision.relationships = serde_json::from_value(json!([{"targetId":player.actor_id,"trust":1,"affection":0,"fear":0,"respect":0,"evidenceIds":[evidence]}])).unwrap();
+        }
         reply.send(Ok(result)).unwrap();
         finish(&mut sim).await;
         assert_eq!(sim.statuses[&(102, false)].state, "idle");
@@ -2303,7 +2283,12 @@ mod tests {
         reply
             .send(Ok(ThinkResult {
                 model_output: None,
-                decision: json!({"summary":"No physical request.","plan":[]}),
+                decision: crate::codex::DecisionResponse::Listener(
+                    crate::model::Interpretation::parse(
+                        json!({"summary":"No physical request.","plan":[]}),
+                    )
+                    .unwrap(),
+                ),
                 tokens: 10,
                 latency_ms: 100.,
                 cleanup_ms: 0.,
@@ -2418,7 +2403,7 @@ mod tests {
                 assert!(request.listener);
                 reply.send(Ok(ThinkResult {
             model_output: None,
-                    decision: json!({"summary":"Wait by the wall.","plan":[{"kind":"wait","seconds":90}]}),
+                    decision: crate::codex::DecisionResponse::Listener(crate::model::Interpretation::parse(json!({"summary":"Wait by the wall.","plan":[{"kind":"wait","seconds":90}]})).unwrap()),
                     tokens: 1, latency_ms: 1., cleanup_ms: 0., recalled: vec![],
                 })).unwrap();
                 finish(&mut sim).await;
@@ -2455,7 +2440,12 @@ mod tests {
         reply
             .send(Ok(ThinkResult {
                 model_output: None,
-                decision: json!({"summary":"Wait.","plan":[{"kind":"wait","seconds":600}]}),
+                decision: crate::codex::DecisionResponse::Listener(
+                    crate::model::Interpretation::parse(
+                        json!({"summary":"Wait.","plan":[{"kind":"wait","seconds":600}]}),
+                    )
+                    .unwrap(),
+                ),
                 tokens: 1,
                 latency_ms: 1.,
                 cleanup_ms: 0.,

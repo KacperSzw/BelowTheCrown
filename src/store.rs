@@ -105,6 +105,26 @@ fn recall_words(query: &str) -> Vec<String> {
         .collect()
 }
 
+/// Give each context component room before a verbose wake reason can consume the budget.
+pub(crate) fn context_query(parts: &[String]) -> String {
+    let words: Vec<_> = parts.iter().map(|part| recall_words(part)).collect();
+    let mut selected = Vec::new();
+    let mut seen = HashSet::new();
+    for index in 0..12 {
+        for part in &words {
+            if let Some(word) = part.get(index)
+                && seen.insert(word.clone())
+            {
+                selected.push(word.as_str());
+                if selected.len() == 12 {
+                    return selected.join(" ");
+                }
+            }
+        }
+    }
+    selected.join(" ")
+}
+
 fn sql_id(id: u64) -> Result<i64> {
     i64::try_from(id).context("Journal ID exceeds SQLite's supported range.")
 }
@@ -129,7 +149,7 @@ pub fn migrate_world(mut raw: Value) -> Result<WorldState> {
         .get("format")
         .and_then(Value::as_u64)
         .context("Missing world format.")?;
-    ensure!((1..=5).contains(&format), "Unsupported world format.");
+    ensure!((1..=6).contains(&format), "Unsupported world format.");
     let time = raw
         .get("time")
         .and_then(Value::as_f64)
@@ -165,7 +185,7 @@ pub fn migrate_world(mut raw: Value) -> Result<WorldState> {
         .entry("interactionTime")
         .or_insert(json!(interaction));
     object.entry("encounters").or_insert(json!([]));
-    object.insert("format".into(), json!(5));
+    object.insert("format".into(), json!(6));
     object.remove("speed");
     let mut world: WorldState = serde_json::from_value(raw).context("Corrupt world snapshot.")?;
     if format < 5 {
@@ -287,7 +307,7 @@ pub fn migrate_world(mut raw: Value) -> Result<WorldState> {
 
 pub fn assert_world(world: &WorldState) -> Result<()> {
     ensure!(
-        world.format == 5
+        world.format == 6
             && matches!(world.language.as_str(), "en" | "pl")
             && matches!(world.mode.as_str(), "solo" | "multiplayer")
             && matches!(world.ending.as_str(), "playing" | "victory" | "death"),
@@ -422,12 +442,34 @@ pub fn assert_world(world: &WorldState) -> Result<()> {
             .last_action_outcome
             .iter()
             .chain(&actor.last_plan_failure)
+            .chain(&actor.recent_action_outcomes)
         {
             outcome.intent.check()?;
             ensure!(
                 outcome.time.is_finite() && outcome.time >= 0. && outcome.time <= world.time,
                 "Invalid action outcome time."
             );
+        }
+        ensure!(
+            actor.recent_action_outcomes.len() <= RECENT_ACTION_LIMIT
+                && actor.recent_action_outcomes.iter().all(|outcome| {
+                    matches!(
+                        outcome.stage,
+                        OutcomeStage::Resolved | OutcomeStage::Failed | OutcomeStage::Interrupted
+                    ) && outcome.ok == (outcome.stage == OutcomeStage::Resolved)
+                        && !matches!(
+                            outcome.intent,
+                            Intent::Speak { .. } | Intent::Inspect { .. }
+                        )
+                })
+                && actor
+                    .recent_action_outcomes
+                    .windows(2)
+                    .all(|pair| pair[0].time <= pair[1].time),
+            "Invalid physical action history."
+        );
+        if !actor.summary.is_empty() {
+            check_text(&actor.summary, NOTEBOOK_MAX_CHARS)?;
         }
         ensure!(
             actor
@@ -616,7 +658,11 @@ impl Store {
                 let query = context.get::<String>(1)?;
                 Ok(query
                     .split('\u{1f}')
-                    .filter(|word| !word.is_empty() && text.iter().any(|actual| actual == word))
+                    .filter(|group| {
+                        group.split('\u{1e}').any(|word| {
+                            !word.is_empty() && text.iter().any(|actual| actual == word)
+                        })
+                    })
                     .count() as i64)
             },
         )?;
@@ -858,6 +904,17 @@ impl Store {
         allocation: [usize; 3],
         excluded: &[[u64; 2]],
     ) -> Result<Vec<Memory>> {
+        self.recall_with_aliases(actor, query, allocation, excluded, &[])
+    }
+    /// Each name and its authored grammatical forms occupy one relevance term.
+    pub fn recall_with_aliases(
+        &self,
+        actor: u16,
+        query: &str,
+        allocation: [usize; 3],
+        excluded: &[[u64; 2]],
+        aliases: &[Vec<String>],
+    ) -> Result<Vec<Memory>> {
         let limit = allocation
             .iter()
             .try_fold(0usize, |sum, n| sum.checked_add(*n))
@@ -865,7 +922,30 @@ impl Store {
         if limit == 0 {
             return Ok(vec![]);
         }
-        let query = recall_words(query).join("\u{1f}");
+        let groups: Vec<Vec<String>> = aliases
+            .iter()
+            .map(|group| {
+                group
+                    .iter()
+                    .filter_map(|alias| {
+                        let words = normalized_words(alias);
+                        (words.len() == 1).then(|| words[0].clone())
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut distinct = HashSet::new();
+        let query = recall_words(query)
+            .into_iter()
+            .map(|word| {
+                groups
+                    .iter()
+                    .find(|group| group.contains(&word))
+                    .map_or(word, |group| group.join("\u{1e}"))
+            })
+            .filter(|group| distinct.insert(group.clone()))
+            .collect::<Vec<_>>()
+            .join("\u{1f}");
         let excluded = serde_json::to_string(excluded)?;
         let candidates = limit.saturating_mul(3).min(i64::MAX as usize) as i64;
         let load = |ranking: &str| -> Result<Vec<Memory>> {
@@ -993,7 +1073,7 @@ impl Store {
                 memories.push(serde_json::from_str(&row?)?);
             }
             let save = SaveData {
-                format: 5,
+                format: 6,
                 world: world.clone(),
                 memories,
                 events: self.events(None, i64::MAX as usize)?,
@@ -1021,7 +1101,7 @@ impl Store {
         ensure!(
             raw.get("format")
                 .and_then(Value::as_u64)
-                .is_some_and(|n| (1..=5).contains(&n)),
+                .is_some_and(|n| (1..=6).contains(&n)),
             "Unsupported save format."
         );
         let world = migrate_world(raw.get("world").context("Missing saved world.")?.clone())?;
@@ -1030,7 +1110,7 @@ impl Store {
         let events: Vec<WorldEvent> =
             serde_json::from_value(raw.get("events").context("Missing saved journal.")?.clone())?;
         let save = SaveData {
-            format: 5,
+            format: 6,
             world,
             memories,
             events,
@@ -1076,7 +1156,7 @@ impl Store {
 
 pub fn validate_snapshot(save: &SaveData) -> Result<()> {
     assert_world(&save.world)?;
-    ensure!(save.format == 5, "Unsupported save format.");
+    ensure!(save.format == 6, "Unsupported save format.");
     ensure!(
         save.world.revision < u64::MAX,
         "World revision is exhausted."

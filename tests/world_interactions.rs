@@ -1042,7 +1042,7 @@ fn authored_objects_and_translated_splits_exist_only_in_new_worlds() {
                 .unwrap()
                 .retain(|item| !(900..=905).contains(&item["id"].as_u64().unwrap()));
             let migrated = migrate_world(legacy).unwrap();
-            assert_eq!(migrated.format, 5);
+            assert_eq!(migrated.format, 6);
             assert!(migrated.items.iter().all(|i| !(900..=905).contains(&i.id)));
         }
     }
@@ -1112,7 +1112,7 @@ fn retired_actions_are_absent_from_new_decisions_but_saved_guard_duration_migrat
     let wrapper = json!({"format":4,"world":migrated,"memories":[],"events":[]});
     assert_eq!(
         Store::parse_snapshot(&wrapper.to_string()).unwrap().format,
-        5
+        6
     );
 }
 #[test]

@@ -8,7 +8,7 @@ mod worker;
 
 use crate::{
     content::WorldContent,
-    model::{EFFORT, MODEL, NpcIdentity},
+    model::{Decision, EFFORT, Interpretation, MODEL, NpcIdentity},
 };
 use anyhow::{Context, Result, bail, ensure};
 use futures::future::BoxFuture;
@@ -51,12 +51,32 @@ pub struct ThinkRequest {
 }
 #[derive(Debug)]
 pub struct ThinkResult {
-    pub decision: Value,
+    pub decision: DecisionResponse,
     pub model_output: Option<Value>,
     pub tokens: u64,
     pub latency_ms: f64,
     pub cleanup_ms: f64,
     pub recalled: Vec<u64>,
+}
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(untagged)]
+pub enum DecisionResponse {
+    Npc(Decision),
+    Listener(Interpretation),
+}
+impl DecisionResponse {
+    pub fn npc(&self) -> Result<&Decision> {
+        match self {
+            Self::Npc(decision) => Ok(decision),
+            Self::Listener(_) => bail!("A listener interpretation cannot control an NPC."),
+        }
+    }
+    pub fn listener(&self) -> Result<&Interpretation> {
+        match self {
+            Self::Listener(interpretation) => Ok(interpretation),
+            Self::Npc(_) => bail!("An NPC decision cannot control a player."),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -420,7 +440,7 @@ impl DriverState {
                         ensure!(p["turn"]["status"] == "completed","NPC turn failed: {}",safe_error(p["turn"]["error"]["message"].as_str().unwrap_or("No completed decision")));
                         recalled.sort_unstable(); recalled.dedup();
                         let model_output: Value = serde_json::from_str(&final_text).map_err(|error| DecisionOutputError(format!("NPC final answer did not contain a JSON decision: {error}")))?;
-                        let decision = (if request.listener { Ok(model_output.clone()) } else { schema::normalize_decision(model_output.clone()) })
+                        let decision = (if request.listener { Interpretation::parse(model_output.clone()).map(DecisionResponse::Listener) } else { schema::normalize_decision(model_output.clone()).map(DecisionResponse::Npc) })
                             .map_err(|error| DecisionOutputError(safe_error(error)))?;
                         return Ok(ThinkResult { decision, model_output:Some(model_output), tokens, latency_ms:started.elapsed().as_secs_f64()*1000., cleanup_ms:0., recalled });
                     },
@@ -731,6 +751,17 @@ fn standard_tier(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn typed_outputs_cannot_cross_player_and_npc_roles() {
+        let listener = DecisionResponse::Listener(
+            Interpretation::parse(json!({"summary":"Observe.","plan":[]})).unwrap(),
+        );
+        assert!(listener.npc().is_err());
+        assert!(listener.listener().is_ok());
+        let npc = DecisionResponse::Npc(Decision::parse(json!({"summary":null,"goals":[],"plan":[],"memories":[],"relationships":[],"acceptPlots":[]})).unwrap());
+        assert!(npc.listener().is_err());
+        assert!(npc.npc().is_ok());
+    }
     #[test]
     fn diagnostics_redact_credentials() {
         assert_eq!(

@@ -76,6 +76,52 @@ accepted through their memory IDs, while greetings and accusations no longer
 create automatic plots. Physical outcomes and victory attribution still use
 the existing engine rules.
 
+## Working memory, bodies and compact observations
+
+Each NPC has one durable private notebook, stored in the existing actor
+`summary`. A decision's `summary: null` keeps it, a string replaces it (up to
+1200 characters), and an empty string clears it. The current notebook appears
+as `world.self.notebook`. It carries intentions, unfinished commitments and
+next steps across unrelated conversations and save/load. It is fallible thought;
+writing that a meal was delivered does not transfer it or prove completion.
+Goals retain their existing complete-list contract; there are no goal IDs or
+additional planning state machines.
+
+The engine records the last action's stage and up to six recent terminal
+physical results in `execution.self.recentActionOutcomes`. Starts and combat
+acceptances are not completions. Speech and inspection cannot erase those
+physical results; interruptions and failures remain distinct. These facts are
+private execution feedback, not new witnessed memories or public chat.
+World/save format 6 reads formats 1–5, keeps existing notes and starts older
+saves with an empty result history rather than inventing past actions.
+
+`world.self.feltNeeds` describes the person's own hunger, thirst and fatigue
+using the configured need thresholds. Other people's needs remain private.
+`forecast.needsDuringDuration` predicts bodily changes over an action's stated
+real duration, before its effects, assuming no interruption or intervening
+action. `continuingActivityForecast` covers the current activity's remaining
+duration. Advancement and forecasts share the same physiology calculation and
+clock conversion. These descriptions never force eating, drinking or resting.
+
+Automatic recall distributes its twelve search terms among goals, nearby
+names, the wake reason, notebook and room. Known authored name forms count as
+one relevance term, including Polish inflections. The recent/relevant/important
+quotas and owned evidence checks remain in place; memories already supplied in
+room chronology are excluded. Persistent NPC threads still use Codex's normal
+compaction.
+
+`execution.actions` is the single mechanical catalog: intents, availability,
+blockers and conditional forecasts. UI labels, command arguments and prose
+hints are omitted. Recipe requirements come from the executor's specification.
+Decisions and listener interpretations are typed inside the process; JSON is
+used at external boundaries. Listener input is built directly from an explicit
+physical projection shared with the player view, without querying the journal
+or building a full view first. Event projection copies only the selected
+observer's perception and preserves unknown sources.
+
+At the user's request, this revision is validated with local tests only.
+No model decisions or live Luna comparisons were performed for it.
+
 ## Codex instructions
 
 The game supplies `baseInstructions` on each new thread, replacing the model's

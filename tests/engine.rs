@@ -56,6 +56,562 @@ fn speech(text: &str) -> Value {
 fn decision(plan: Vec<Value>) -> Value {
     json!({"summary":"A test-owned intention.","goals":["A test-owned goal."],"plan":plan,"memories":[],"relationships":[],"acceptPlots":[]})
 }
+
+#[test]
+fn notebook_updates_keep_clear_and_restore_one_private_working_memory() {
+    let mut engine = solo();
+    let note = "I accepted a meal delivery. The bowl is ready; give it after this conversation.";
+    let mut raw = decision(vec![]);
+    raw["summary"] = json!(note);
+    assert_eq!(apply(&mut engine, 102, raw.clone())["ok"], true);
+    raw["summary"] = Value::Null;
+    assert_eq!(apply(&mut engine, 102, raw.clone())["ok"], true);
+    assert_eq!(engine.actor(102).unwrap().summary, note);
+    let own = engine.observation(102, "An unrelated greeting.").unwrap();
+    assert_eq!(own["input"]["world"]["self"]["notebook"], note);
+    assert!(
+        !engine
+            .observation(PLAYER, "Nearby.")
+            .unwrap()
+            .to_string()
+            .contains(note)
+    );
+    assert!(
+        !engine
+            .player_view(PLAYER)
+            .unwrap()
+            .to_string()
+            .contains(note)
+    );
+    engine.save("notebook").unwrap();
+    raw["summary"] = json!("");
+    assert_eq!(apply(&mut engine, 102, raw)["ok"], true);
+    assert!(engine.actor(102).unwrap().summary.is_empty());
+    engine.load("notebook", "pl").unwrap();
+    assert_eq!(engine.actor(102).unwrap().summary, note);
+}
+
+#[test]
+fn rejected_and_stale_decisions_cannot_replace_the_notebook_or_execution_facts() {
+    let mut engine = solo();
+    let before = json!(engine.actor(102).unwrap());
+    let mut raw = decision(vec![json!({"kind":"drink","itemId":1023})]);
+    raw["summary"] = json!("The drink was finished.");
+    assert_eq!(apply(&mut engine, 102, raw.clone())["ok"], false);
+    assert_eq!(json!(engine.actor(102).unwrap()), before);
+    raw["plan"] = json!([]);
+    let version = engine.actor(102).unwrap().decision_version;
+    assert_eq!(
+        engine.apply_decision(102, raw, version + 1, &[]).unwrap()["ok"],
+        false
+    );
+    assert_eq!(json!(engine.actor(102).unwrap()), before);
+    for invalid in [" ".to_owned(), "x".repeat(1201), "\u{001b}[2J".to_owned()] {
+        let mut raw = decision(vec![]);
+        raw["summary"] = json!(invalid);
+        assert_eq!(apply(&mut engine, 102, raw)["ok"], false);
+        assert_eq!(json!(engine.actor(102).unwrap()), before);
+    }
+}
+
+#[test]
+fn physical_results_survive_speech_inspection_and_restore_without_inventing_completion() {
+    let mut engine = solo();
+    let result = act(
+        &mut engine,
+        102,
+        json!({"kind":"take","itemId":1023,"quantity":1}),
+    );
+    assert_eq!(result["ok"], true);
+    assert!(engine.actor(102).unwrap().recent_action_outcomes.is_empty());
+    assert_eq!(
+        engine
+            .actor(102)
+            .unwrap()
+            .last_action_outcome
+            .as_ref()
+            .unwrap()
+            .stage,
+        OutcomeStage::Started
+    );
+    engine.advance(engine.tuning.action_seconds + 1e-8).unwrap();
+    let facts = json!(engine.actor(102).unwrap().recent_action_outcomes);
+    assert_eq!(facts.as_array().unwrap().len(), 1);
+    assert_eq!(facts[0]["stage"], "resolved");
+    assert_eq!(facts[0]["intent"]["kind"], "take");
+    finish(&mut engine, 102, speech("An unrelated remark."));
+    finish(&mut engine, 102, json!({"kind":"inspect","targetId":102}));
+    assert_eq!(
+        json!(engine.actor(102).unwrap().recent_action_outcomes),
+        facts
+    );
+    assert!(
+        !engine
+            .player_view(PLAYER)
+            .unwrap()
+            .to_string()
+            .contains("recentActionOutcomes")
+    );
+    assert!(engine.observation(PLAYER, "Nearby.").unwrap()["input"]["execution"]["self"]["recentActionOutcomes"].as_array().unwrap().is_empty());
+    engine.save("physical-results").unwrap();
+    engine.load("physical-results", "en").unwrap();
+    assert_eq!(
+        json!(engine.actor(102).unwrap().recent_action_outcomes),
+        facts
+    );
+}
+
+#[test]
+fn interruptions_and_failures_are_terminal_results_and_history_is_bounded() {
+    let mut engine = solo();
+    assert_eq!(
+        act(&mut engine, 102, json!({"kind":"rest","seconds":600}))["ok"],
+        true
+    );
+    engine.cancel_player_plan(102).unwrap();
+    let history = &engine.actor(102).unwrap().recent_action_outcomes;
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].stage, OutcomeStage::Interrupted);
+    assert!(!history[0].ok);
+    for _ in 0..8 {
+        finish(&mut engine, 102, json!({"kind":"wait","seconds":5}));
+    }
+    let actor = engine.actor(102).unwrap();
+    assert_eq!(actor.recent_action_outcomes.len(), 6);
+    assert!(
+        actor
+            .recent_action_outcomes
+            .iter()
+            .all(|outcome| outcome.stage == OutcomeStage::Resolved)
+    );
+    assert_world(&engine.world).unwrap();
+}
+
+#[test]
+fn older_formats_keep_existing_notes_and_start_without_fabricated_result_history() {
+    let engine = solo();
+    for format in 1..=5 {
+        let mut raw = json!(engine.world);
+        raw["format"] = json!(format);
+        for actor in raw["actors"].as_array_mut().unwrap() {
+            actor["summary"] = json!("A preserved legacy note.");
+            actor
+                .as_object_mut()
+                .unwrap()
+                .remove("recentActionOutcomes");
+        }
+        let world = migrate_world(raw).unwrap();
+        assert_eq!(world.format, 6);
+        assert!(
+            world
+                .actors
+                .iter()
+                .all(|actor| actor.summary == "A preserved legacy note."
+                    && actor.recent_action_outcomes.is_empty())
+        );
+    }
+    let mut raw = json!(engine.world);
+    raw["actors"][0]["recentActionOutcomes"] = json!([{"intent":{"kind":"wait","seconds":1},"ok":true,"reason":"Started only.","time":engine.world.time,"stage":"started"}]);
+    assert!(migrate_world(raw).is_err());
+}
+
+#[test]
+fn felt_needs_follow_owned_thresholds_and_never_expose_another_actors_meters() {
+    for language in ["en", "pl"] {
+        let mut engine =
+            Engine::memory_with_tuning("castle", language, 17, "solo", tuning()).unwrap();
+        engine.tuning.need_thresholds = vec![20., 60.];
+        let actor = engine.actor_mut(102).unwrap();
+        actor.hunger = 10.;
+        actor.thirst = 70.;
+        actor.fatigue = 30.;
+        let input = engine.observation(102, "My body.").unwrap()["input"].clone();
+        let needs = &input["world"]["self"]["feltNeeds"];
+        assert_eq!(
+            needs["hunger"],
+            if language == "en" {
+                "not pressing"
+            } else {
+                "nie dokucza"
+            }
+        );
+        assert_eq!(
+            needs["thirst"],
+            if language == "en" {
+                "intense thirst"
+            } else {
+                "silne pragnienie"
+            }
+        );
+        assert_eq!(
+            needs["fatigue"],
+            if language == "en" {
+                "tired"
+            } else {
+                "zmęczenie"
+            }
+        );
+        let nearby = engine.observation(PLAYER, "Nearby.").unwrap();
+        let person = nearby["input"]["world"]["people"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|person| person["id"] == 102)
+            .unwrap();
+        assert!(person.get("feltNeeds").is_none());
+        for field in [
+            "hunger",
+            "thirst",
+            "fatigue",
+            "notebook",
+            "summary",
+            "recentActionOutcomes",
+        ] {
+            assert!(person.get(field).is_none());
+        }
+    }
+}
+
+#[test]
+fn duration_need_forecasts_match_real_physiology_and_are_read_only() {
+    for resting in [false, true] {
+        for rate in [12., 27.] {
+            let mut config = tuning();
+            config.hunger_per_hour = rate;
+            config.thirst_per_hour = rate * 1.5;
+            config.fatigue_per_hour = rate / 2.;
+            let mut engine =
+                Engine::memory_with_tuning("castle", "en", 17, "solo", config).unwrap();
+            let actor = engine.actor_mut(102).unwrap();
+            actor.hunger = 10.;
+            actor.thirst = 15.;
+            actor.fatigue = 50.;
+            actor.health = 60.;
+            let before = json!(engine.world);
+            let actions = engine.actions(102).unwrap();
+            let action = actions
+                .iter()
+                .find(|action| action["intent"]["kind"] == if resting { "rest" } else { "wait" })
+                .unwrap();
+            let duration = action["forecast"]["durationRealSeconds"].as_f64().unwrap();
+            let delta = &action["forecast"]["needsDuringDuration"];
+            let expected = [
+                10. + delta["hungerDelta"].as_f64().unwrap(),
+                15. + delta["thirstDelta"].as_f64().unwrap(),
+                50. + delta["fatigueDelta"].as_f64().unwrap(),
+                60. + delta["healthDelta"].as_f64().unwrap(),
+            ];
+            assert_eq!(json!(engine.world), before);
+            assert_eq!(act(&mut engine, 102, action["intent"].clone())["ok"], true);
+            engine.advance(duration).unwrap();
+            let after = engine.actor(102).unwrap();
+            for (actual, expected) in [after.hunger, after.thirst, after.fatigue, after.health]
+                .into_iter()
+                .zip(expected)
+            {
+                assert!((actual - expected).abs() < 1e-8, "{actual} != {expected}");
+            }
+        }
+    }
+}
+
+#[test]
+fn npc_catalog_preserves_all_choices_and_blockers_without_ui_or_duplicate_lists() {
+    for language in ["en", "pl"] {
+        let engine = Engine::memory_with_tuning("castle", language, 17, "solo", tuning()).unwrap();
+        let observed = engine.observation(102, "Choices.").unwrap();
+        let execution = &observed["input"]["execution"];
+        assert!(execution.get("availableActions").is_none());
+        assert!(execution.get("actionDetails").is_none());
+        let catalog = execution["actions"].as_array().unwrap();
+        let ui = engine.actions(102).unwrap();
+        assert_eq!(catalog.len(), ui.len());
+        assert!(catalog.iter().any(|action| action["available"] == false));
+        for (model, ui) in catalog.iter().zip(&ui) {
+            for field in ["intent", "available", "reason"] {
+                assert_eq!(model.get(field), ui.get(field));
+            }
+            let mut forecast = ui["forecast"].clone();
+            forecast.as_object_mut().unwrap().remove("hint");
+            assert_eq!(model["forecast"], forecast);
+            assert!(model.get("command").is_none());
+            assert!(model.get("arguments").is_none());
+            assert!(model["forecast"].get("hint").is_none());
+        }
+        let old_style = json!({"availableActions":ui.iter().filter(|a| a["available"] == true).map(|a|a["intent"].clone()).collect::<Vec<_>>(),"actionDetails":ui.iter().map(|a|json!({"intent":a["intent"],"available":a["available"],"reason":a.get("reason"),"forecast":a["forecast"]})).collect::<Vec<_>>()});
+        assert!(
+            serde_json::to_vec(catalog).unwrap().len()
+                < serde_json::to_vec(&old_style).unwrap().len()
+        );
+    }
+}
+
+#[test]
+fn listener_uses_only_the_physical_projection_without_reading_journals() {
+    let engine = solo();
+    let full = engine.player_view(PLAYER).unwrap();
+    let projected = engine.listener_view(PLAYER).unwrap();
+    for field in [
+        "room",
+        "doors",
+        "actors",
+        "items",
+        "inventory",
+        "combat",
+        "map",
+        "language",
+        "time",
+    ] {
+        assert_eq!(projected[field], full[field]);
+    }
+    for field in ["events", "journal", "objective", "branch", "listener"] {
+        assert!(projected.get(field).is_none());
+    }
+    for field in [
+        "summary",
+        "notebook",
+        "goals",
+        "recentActionOutcomes",
+        "portraitKey",
+    ] {
+        assert!(projected["self"].get(field).is_none());
+    }
+    assert!(
+        projected["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|action| action["available"] == true)
+    );
+    engine
+        .store
+        .db
+        .execute(
+            "UPDATE memories SET data='invalid json' WHERE actor_id=?1",
+            [PLAYER],
+        )
+        .unwrap();
+    assert!(engine.player_view(PLAYER).is_err());
+    assert_eq!(engine.listener_view(PLAYER).unwrap(), projected);
+}
+
+#[test]
+fn balanced_retrieval_keeps_goal_evidence_after_a_long_irrelevant_wake_reason() {
+    let mut engine = solo();
+    engine.actor_mut(102).unwrap().goals = vec!["saffron".into()];
+    let put = |text: &str, importance| {
+        engine
+            .store
+            .remember(Memory {
+                id: 0,
+                actor_id: 102,
+                time: engine.world.time,
+                event_id: None,
+                kind: "background".into(),
+                text: text.into(),
+                importance,
+                source_id: None,
+                evidence_ids: vec![],
+                perceived: None,
+            })
+            .unwrap()
+            .id
+    };
+    let wanted = put("The saffron delivery remains unfinished.", 1);
+    for _ in 0..80 {
+        put("Unrelated ordinary detail.", 10);
+    }
+    let reason =
+        "alpha beta gamma delta epsilon zeta theta iota kappa lambda muword nuword xiword omicron"
+            .repeat(10);
+    let observed = engine.observation(102, &reason).unwrap();
+    assert!(
+        observed["input"]["world"]["memories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|memory| memory["id"] == wanted)
+    );
+    assert!(
+        observed["context"]["evidenceIds"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(wanted))
+    );
+}
+
+#[test]
+fn authored_name_forms_share_one_relevance_term_without_crossing_memory_owners() {
+    let store = Store::memory().unwrap();
+    let put = |actor_id, text: &str| {
+        store
+            .remember(Memory {
+                id: 0,
+                actor_id,
+                time: 0.,
+                event_id: None,
+                kind: "background".into(),
+                text: text.into(),
+                importance: 1,
+                source_id: None,
+                evidence_ids: vec![],
+                perceived: None,
+            })
+            .unwrap()
+            .id
+    };
+    let wanted = put(102, "Dałem Jadwidze gotową miskę.");
+    let foreign = put(
+        103,
+        "Jadwiga Jadwigi Jadwidze Jadwigą Jadwigo private secret.",
+    );
+    let aliases = vec![vec![
+        "Jadwiga".into(),
+        "Jadwigi".into(),
+        "Jadwidze".into(),
+        "Jadwigą".into(),
+        "Jadwigo".into(),
+    ]];
+    let recalled = store
+        .recall_with_aliases(102, "Jadwiga", [0, 1, 0], &[], &aliases)
+        .unwrap();
+    assert_eq!(recalled.len(), 1);
+    assert_eq!(recalled[0].id, wanted);
+    assert_ne!(recalled[0].id, foreign);
+    assert!(
+        store
+            .recall_with_aliases(102, "Jadwiga", [0, 1, 0], &[[wanted, wanted]], &aliases)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn duplicate_name_forms_do_not_outweigh_two_independent_relevance_terms() {
+    let store = Store::memory().unwrap();
+    let put = |text: &str| {
+        store
+            .remember(Memory {
+                id: 0,
+                actor_id: 102,
+                time: 0.,
+                event_id: None,
+                kind: "background".into(),
+                text: text.into(),
+                importance: 1,
+                source_id: None,
+                evidence_ids: vec![],
+                perceived: None,
+            })
+            .unwrap()
+            .id
+    };
+    let wanted = put("Jadwiga brought saffron.");
+    put("Jadwiga Jadwigi Jadwidze.");
+    let aliases = vec![vec!["Jadwiga".into(), "Jadwigi".into(), "Jadwidze".into()]];
+    let recalled = store
+        .recall_with_aliases(
+            102,
+            "Jadwiga Jadwigi Jadwidze saffron",
+            [0, 1, 0],
+            &[],
+            &aliases,
+        )
+        .unwrap();
+    assert_eq!(recalled[0].id, wanted);
+}
+
+#[test]
+fn danger_and_a_failed_completion_keep_terminal_physical_facts() {
+    let mut engine = solo();
+    assert_eq!(
+        act(&mut engine, 102, json!({"kind":"rest","seconds":600}))["ok"],
+        true
+    );
+    assert_eq!(
+        act(
+            &mut engine,
+            PLAYER,
+            json!({"kind":"attack","targetId":102,"style":"subdue"})
+        )["ok"],
+        true
+    );
+    let actor = engine.actor(102).unwrap();
+    assert!(actor.activity.is_none());
+    assert_eq!(
+        actor.recent_action_outcomes.last().unwrap().stage,
+        OutcomeStage::Interrupted
+    );
+    let mut engine = solo();
+    assert_eq!(
+        act(&mut engine, 102, json!({"kind":"take","itemId":1023}))["ok"],
+        true
+    );
+    item_owned(&mut engine, 1023, PLAYER);
+    engine.advance(engine.tuning.action_seconds + 1e-8).unwrap();
+    let failed = engine
+        .actor(102)
+        .unwrap()
+        .recent_action_outcomes
+        .last()
+        .unwrap();
+    assert_eq!(failed.stage, OutcomeStage::Failed);
+    assert!(!failed.ok);
+    assert!(matches!(failed.intent, Intent::Take { item_id: 1023, .. }));
+    assert_world(&engine.world).unwrap();
+}
+
+#[test]
+fn severe_duration_forecasts_preserve_saturation_damage_and_dead_bodies() {
+    for hunger_rate in [0., 18.] {
+        let mut config = tuning();
+        config.hunger_per_hour = hunger_rate;
+        config.thirst_per_hour = 0.;
+        let mut engine = Engine::memory_with_tuning("castle", "en", 17, "solo", config).unwrap();
+        let actor = engine.actor_mut(102).unwrap();
+        actor.hunger = 100.;
+        actor.thirst = 100.;
+        actor.fatigue = 10.;
+        actor.health = 65.;
+        let before = json!(engine.world);
+        let actions = engine.actions(102).unwrap();
+        let wait = actions
+            .iter()
+            .find(|a| a["intent"]["kind"] == "wait")
+            .unwrap();
+        let duration = wait["forecast"]["durationRealSeconds"].as_f64().unwrap();
+        let forecast = &wait["forecast"]["needsDuringDuration"];
+        assert_eq!(forecast["hungerDelta"], 0.);
+        assert_eq!(forecast["thirstDelta"], 0.);
+        let expected_damage = 37. * duration * PHYSIOLOGY_RATE / 3600.;
+        assert!((forecast["healthDelta"].as_f64().unwrap() + expected_damage).abs() < 1e-8);
+        assert_eq!(json!(engine.world), before);
+        assert_eq!(act(&mut engine, 102, wait["intent"].clone())["ok"], true);
+        engine.advance(duration).unwrap();
+        assert!((engine.actor(102).unwrap().health - (65. - expected_damage)).abs() < 1e-8);
+        assert_eq!(
+            engine
+                .actor(102)
+                .unwrap()
+                .recent_action_outcomes
+                .last()
+                .unwrap()
+                .stage,
+            OutcomeStage::Resolved
+        );
+        engine.actor_mut(102).unwrap().health = 0.;
+        let rest = engine
+            .actions(102)
+            .unwrap()
+            .into_iter()
+            .find(|a| a["intent"]["kind"] == "rest")
+            .unwrap();
+        assert_eq!(
+            rest["forecast"]["needsDuringDuration"],
+            json!({"hungerDelta":0.,"thirstDelta":0.,"fatigueDelta":0.,"healthDelta":0.})
+        );
+    }
+}
 fn apply(engine: &mut Engine, id: u16, raw: Value) -> Value {
     let observed = engine
         .observation(id, "A controlled test situation.")
@@ -3183,7 +3739,7 @@ fn version_one_world_migrates_to_same_solo_owner_and_resources() {
         actor.as_object_mut().unwrap().remove("enteredEventId");
     }
     let migrated = migrate_world(legacy).unwrap();
-    assert_eq!(migrated.format, 5);
+    assert_eq!(migrated.format, 6);
     assert_eq!(migrated.mode, "solo");
     assert_eq!(migrated.scenario_id, "castle");
     assert_eq!(migrated.players[0].actor_id, PLAYER);
@@ -3538,9 +4094,13 @@ fn available_actions_follow_custody_and_a_take_then_drink_plan_executes() {
     let mut engine = solo();
     engine.actor_mut(102).unwrap().thirst = 80.;
     let before = engine.observation(102, "Thirsty.").unwrap();
-    let actions = before["input"]["execution"]["availableActions"]
+    let actions = before["input"]["execution"]["actions"]
         .as_array()
-        .unwrap();
+        .unwrap()
+        .iter()
+        .filter(|action| action["available"] == true)
+        .map(|action| action["intent"].clone())
+        .collect::<Vec<_>>();
     assert!(actions.contains(&json!({"kind":"take","itemId":1023,"quantity":1})));
     assert!(!actions.contains(&json!({"kind":"drink","itemId":1023})));
     for action in actions {
@@ -3569,6 +4129,14 @@ fn available_actions_follow_custody_and_a_take_then_drink_plan_executes() {
     let during = engine.observation(102, "Already holding water.").unwrap();
     assert_eq!(
         during["input"]["execution"]["self"]["lastActionOutcome"]["intent"]["kind"],
+        "drink"
+    );
+    assert_eq!(
+        during["input"]["execution"]["self"]["lastActionOutcome"]["stage"],
+        "started"
+    );
+    assert_eq!(
+        during["input"]["execution"]["self"]["recentActionOutcomes"][0]["intent"]["kind"],
         "take"
     );
     engine.advance(engine.tuning.action_seconds).unwrap();
@@ -3583,10 +4151,12 @@ fn available_actions_follow_custody_and_a_take_then_drink_plan_executes() {
         true
     );
     assert!(
-        after["input"]["execution"]["availableActions"]
+        after["input"]["execution"]["actions"]
             .as_array()
             .unwrap()
-            .contains(&json!({"kind":"drink","itemId":1023}))
+            .iter()
+            .any(|action| action["available"] == true
+                && action["intent"] == json!({"kind":"drink","itemId":1023}))
     );
 }
 

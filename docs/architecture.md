@@ -62,7 +62,9 @@ subsequently obtained through its own recall. Hearing does not oblige a reply.
 
 ## Actions and items
 
-World/save format 5 reads formats 1–4 without inserting new authored objects.
+World/save format 6 reads formats 1–5 without inserting new authored objects.
+It preserves the existing private notebook and adds a bounded private history
+of terminal physical results. Older saves start with an empty history.
 Transfer intents have an eight-bit quantity: 1–255 units, or zero for all.
 New player command defaults and examples select one unit; absent legacy fields
 retain all-stack behavior. Offers fix an amount without reserving stock.

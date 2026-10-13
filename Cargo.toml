@@ -1,6 +1,6 @@
 [package]
 name = "below-the-crown"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.99"
 description = "A ruthless medieval social sandbox with LLM-driven characters and local multiplayer"

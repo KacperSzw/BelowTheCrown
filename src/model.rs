@@ -10,6 +10,8 @@ pub const MODEL: &str = "gpt-6-luna";
 pub const EFFORT: &str = "high";
 pub const CLOCK_RATE: f64 = 24.0;
 pub const PHYSIOLOGY_RATE: f64 = 5.0;
+pub const NOTEBOOK_MAX_CHARS: usize = 1200;
+pub const RECENT_ACTION_LIMIT: usize = 6;
 pub const HIDDEN: u8 = 1;
 pub const DISGUISED: u8 = 2;
 pub const RESTRAINED: u8 = 4;
@@ -226,6 +228,28 @@ impl Intent {
             _ => None,
         }
     }
+    pub fn entity_ids(&self) -> impl Iterator<Item = u16> {
+        let offer = match self {
+            Self::AcceptOffer { offer_id } | Self::DeclineOffer { offer_id } => Some(*offer_id),
+            _ => None,
+        };
+        let victim = match self {
+            Self::Speak {
+                plot: Some(plot), ..
+            } => Some(plot.victim_id),
+            _ => None,
+        };
+        [
+            self.item_id(),
+            self.door_id(),
+            self.target_id(),
+            offer,
+            victim,
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|id| *id > 0)
+    }
     pub fn door_id(&self) -> Option<u16> {
         match self {
             Self::Move { door_id }
@@ -323,6 +347,16 @@ pub enum Recipe {
     Lockpick,
     Medicine,
 }
+impl Recipe {
+    pub const ALL: [Self; 3] = [Self::Meal, Self::Lockpick, Self::Medicine];
+    pub fn command(self) -> &'static str {
+        match self {
+            Self::Meal => "meal",
+            Self::Lockpick => "lockpick",
+            Self::Medicine => "medicine",
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AttackStyle {
@@ -377,7 +411,8 @@ pub struct PlotIntent {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Decision {
-    pub summary: String,
+    /// None keeps the private notebook; a string replaces it (empty clears it).
+    pub summary: Option<String>,
     pub goals: Vec<String>,
     pub plan: Vec<Intent>,
     pub memories: Vec<MentalMemory>,
@@ -428,20 +463,23 @@ pub struct Interpretation {
 impl Interpretation {
     pub fn parse(raw: Value) -> Result<Self> {
         let interpretation: Self = serde_json::from_value(raw)?;
-        check_text(&interpretation.summary, 300)?;
+        interpretation.check()?;
+        Ok(interpretation)
+    }
+    pub fn check(&self) -> Result<()> {
+        check_text(&self.summary, 300)?;
         ensure!(
-            interpretation.plan.len() <= 3,
+            self.plan.len() <= 3,
             "Interpretations contain at most three physical actions."
         );
-        for intent in &interpretation.plan {
+        for intent in &self.plan {
             intent.check()?;
             ensure!(
                 !matches!(intent, Intent::Speak { .. }),
                 "An interpretation cannot invent speech."
             );
         }
-        check_new_plan(&interpretation.plan)?;
-        Ok(interpretation)
+        check_new_plan(&self.plan)
     }
 }
 pub fn check_new_plan(plan: &[Intent]) -> Result<()> {
@@ -486,8 +524,18 @@ pub fn check_text(text: &str, maximum: usize) -> Result<()> {
 }
 impl Decision {
     pub fn parse(raw: Value) -> Result<Self> {
-        let mut decision: Self = serde_json::from_value(raw)?;
-        check_text(&decision.summary, 300)?;
+        ensure!(
+            raw.get("summary").is_some(),
+            "Missing notebook update; use null to keep it."
+        );
+        Self::check(serde_json::from_value(raw)?)
+    }
+    pub fn check(mut decision: Self) -> Result<Self> {
+        if let Some(summary) = &decision.summary
+            && !summary.is_empty()
+        {
+            check_text(summary, NOTEBOOK_MAX_CHARS)?;
+        }
         ensure!(
             decision.goals.len() <= 5
                 && decision.plan.len() <= 6
@@ -682,6 +730,9 @@ pub struct Actor {
     pub last_action_outcome: Option<ActionOutcome>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_plan_failure: Option<ActionOutcome>,
+    /// Bounded terminal physical results, never overwritten by speech or inspection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_action_outcomes: Vec<ActionOutcome>,
     #[serde(default)]
     pub correction_used: bool,
 }
@@ -709,6 +760,21 @@ pub enum OutcomeStage {
     Interrupted,
 }
 impl Actor {
+    pub fn remember_action_outcome(&mut self, outcome: ActionOutcome) {
+        if matches!(
+            outcome.stage,
+            OutcomeStage::Resolved | OutcomeStage::Failed | OutcomeStage::Interrupted
+        ) && !matches!(
+            outcome.intent,
+            Intent::Speak { .. } | Intent::Inspect { .. }
+        ) {
+            self.recent_action_outcomes.push(outcome.clone());
+            if self.recent_action_outcomes.len() > RECENT_ACTION_LIMIT {
+                self.recent_action_outcomes.remove(0);
+            }
+        }
+        self.last_action_outcome = Some(outcome);
+    }
     pub fn clear_plan(&mut self) {
         self.plan.clear();
         self.last_acquired_item_id = 0;
@@ -936,16 +1002,20 @@ impl WorldEvent {
         if !self.audience.contains(&observer) {
             return None;
         }
-        let mut result = self.clone();
-        if let Some(perception) = self.perceptions.iter().find(|p| p.actor_id == observer) {
-            result.text = perception.text.clone();
-            result.room_id = Some(perception.room_id);
-            result.actor_id = perception.source_id;
-            result.details = perception.details.clone();
-        }
-        result.audience = vec![observer];
-        result.perceptions.clear();
-        Some(result)
+        let perception = self.perceptions.iter().find(|p| p.actor_id == observer);
+        Some(Self {
+            id: self.id,
+            time: self.time,
+            kind: self.kind.clone(),
+            actor_id: perception.map_or(self.actor_id, |p| p.source_id),
+            room_id: perception.map_or(self.room_id, |p| Some(p.room_id)),
+            text: perception.map_or(&self.text, |p| &p.text).clone(),
+            audience: vec![observer],
+            causes: self.causes.clone(),
+            sound: self.sound.clone(),
+            perceptions: vec![],
+            details: perception.map_or(&self.details, |p| &p.details).clone(),
+        })
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

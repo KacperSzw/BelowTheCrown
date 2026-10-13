@@ -5,6 +5,12 @@ Jadwigi (106), polskiej kucharki ze scenariusza `castle`, z decyzji 21 w ocenie
 z 12 października 2026. To kontrolowana scena, bez wewnętrznego rozumowania
 modelu. W tej próbce Elżbieta prosiła o jedną miskę gotowej potrawki.
 
+To zapis historyczny sprzed aktualizacji notatnika i katalogu działań.
+Bieżący kontekst używa `world.self.notebook`, `world.self.feltNeeds`,
+`execution.self.recentActionOutcomes` oraz jednego `execution.actions`.
+Wynik `summary: null` zachowuje notatnik, tekst go zastępuje, a pusty tekst
+czyści. Opis aktualnego formatu znajduje się w [npc-minds.md](npc-minds.md).
+
 Tożsamość (`actorId`, `name`, `role`, `biography`, `personality`) wiąże silnik
 w instrukcji prywatnego wątku Codexa. Model nie wybiera osoby, za którą działa.
 Produkcja używa `gpt-6-luna`, `high`, standardowego tieru. Wątek NPC jest

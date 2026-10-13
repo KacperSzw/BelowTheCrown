@@ -454,7 +454,7 @@ async fn doctor(directory: &Path, options: DoctorArgs) -> Result<()> {
         drop(decision);
         driver.reset().await;
         let decision = result.context("The live Codex check timed out")??;
-        below_the_crown::model::Decision::parse(decision.decision)?;
+        below_the_crown::model::Decision::check(decision.decision.npc()?.clone())?;
         println!(
             "Live decision: valid · {} tokens · {:.1}s",
             decision.tokens,

@@ -312,7 +312,7 @@ async fn codex_request_conformance() -> Result<()> {
                 let cancellation=CancellationToken::new();
                 let mut thinking=driver.think(request.clone(),cancellation.clone());
                 let result=tokio::select! { result=&mut thinking=>result, _=tokio::time::sleep(Duration::from_secs(30))=>{cancellation.cancel();let _=thinking.await;bail!("Mock decision timed out")} }?;
-                if !listener {ensure!(result.decision["plan"][0]["kind"]=="speak" && result.decision["plan"][1]["kind"]=="wait" && result.model_output.as_ref().is_some_and(|v|v["utterance"]["afterSteps"]==0), "Native utterance did not normalize into the canonical execution order");}
+                if !listener {ensure!(matches!(result.decision.npc()?.plan[0], crate::model::Intent::Speak { .. }) && matches!(result.decision.npc()?.plan[1], crate::model::Intent::Wait { .. }) && result.model_output.as_ref().is_some_and(|v|v["utterance"]["afterSteps"]==0), "Native utterance did not normalize into the canonical execution order");}
                 if index==0 {ensure!(result.recalled==vec![987],"Recall evidence missing");} else {ensure!(result.recalled.is_empty(),"Another decision inherited recalled evidence");}
                 expected.push(request);
             }

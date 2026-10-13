@@ -221,9 +221,9 @@ async fn review_turn(
         evidence.extend(&result.recalled);
         evidence.sort_unstable();
         evidence.dedup();
-        let verdict = engine.apply_decision(
+        let verdict = engine.apply_npc_decision(
             actor,
-            result.decision.clone(),
+            result.decision.npc()?.clone(),
             observation["context"]["version"]
                 .as_u64()
                 .context("Missing version")?,
@@ -645,7 +645,7 @@ async fn court_review_batch(
                 evidence.extend(&result.recalled);evidence.sort_unstable();evidence.dedup();
                 let version=observation["context"]["version"].as_u64().context("Missing version")?;
                 let superseded=engine.actor(request.actor_id)?.decision_version!=version;
-                let verdict=if superseded {json!({"ok":true,"superseded":true})} else {engine.apply_decision(request.actor_id,result.decision.clone(),version,&evidence)?};
+        let verdict=if superseded {json!({"ok":true,"superseded":true})} else {engine.apply_npc_decision(request.actor_id,result.decision.npc()?.clone(),version,&evidence)?};
                 review.lock().expect("review").record(json!({"type":"decision","label":label,"serial":serial,"scenario":"castle","language":engine.language,"actorId":request.actor_id,"identity":request.identity,"input":request.input,"decision":result.decision,"validator":verdict,"before":before,"after":body(engine,request.actor_id)?,"tokens":result.tokens,"latencyMs":result.latency_ms}))?;
                 eprintln!("Court review {serial}/24 · {} {} · {label} · accepted {} · superseded {superseded}",engine.language,request.actor_id,verdict["ok"]);
                 if verdict["ok"]!=true {invalid.push((request.actor_id,verdict["message"].as_str().unwrap_or("Invalid decision").to_owned()));}

@@ -1,4 +1,7 @@
-use crate::model::{Decision, Intent, PlotIntent, Volume};
+use crate::model::{
+    Decision, HeardProposal, Intent, MentalMemory, NOTEBOOK_MAX_CHARS, PlotIntent, Recipe,
+    RelationshipUpdate, Volume,
+};
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -12,13 +15,23 @@ struct Utterance {
     plot: Option<PlotIntent>,
     after_steps: u8,
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WireDecision {
+    summary: Option<String>,
+    goals: Vec<String>,
+    plan: Vec<Intent>,
+    utterance: Option<Utterance>,
+    memories: Vec<MentalMemory>,
+    relationships: Vec<RelationshipUpdate>,
+    accept_plots: Vec<u16>,
+    accept_heard_proposals: Vec<HeardProposal>,
+}
 
 // The native model chooses words independently of physical steps. Saves and
 // the executor retain their canonical ordered Intent representation.
-pub fn normalize_decision(mut raw: Value) -> Result<Value> {
-    let object = raw
-        .as_object_mut()
-        .context("A decision must be an object.")?;
+pub fn normalize_decision(raw: Value) -> Result<Decision> {
+    let object = raw.as_object().context("A decision must be an object.")?;
     ensure!(
         [
             "summary",
@@ -35,7 +48,7 @@ pub fn normalize_decision(mut raw: Value) -> Result<Value> {
         "An NPC wire decision must include all eight fields."
     );
     let words = object
-        .remove("utterance")
+        .get("utterance")
         .context("Missing utterance; use null for silence.")?;
     if let Some(fields) = words.as_object() {
         ensure!(
@@ -45,35 +58,38 @@ pub fn normalize_decision(mut raw: Value) -> Result<Value> {
             "An utterance must include all five fields."
         );
     }
-    let utterance: Option<Utterance> = serde_json::from_value(words)?;
-    let plan = object
-        .get_mut("plan")
-        .and_then(Value::as_array_mut)
-        .context("A decision must contain a physical plan.")?;
-    for step in plan.iter() {
-        let intent: Intent = serde_json::from_value(step.clone())?;
+    let mut wire: WireDecision = serde_json::from_value(raw)?;
+    for intent in &wire.plan {
         ensure!(
             !matches!(intent, Intent::Speak { .. }),
             "Speech belongs in utterance, not plan."
         );
     }
-    if let Some(utterance) = utterance {
+    if let Some(utterance) = wire.utterance {
         let position = usize::from(utterance.after_steps);
         ensure!(
-            position <= plan.len(),
+            position <= wire.plan.len(),
             "utterance.afterSteps exceeds the physical plan length."
         );
-        plan.insert(
+        wire.plan.insert(
             position,
-            serde_json::to_value(Intent::Speak {
+            Intent::Speak {
                 text: utterance.text,
                 target_id: utterance.target_id,
                 volume: utterance.volume,
                 plot: utterance.plot,
-            })?,
+            },
         );
     }
-    Ok(serde_json::to_value(Decision::parse(raw)?)?)
+    Decision::check(Decision {
+        summary: wire.summary,
+        goals: wire.goals,
+        plan: wire.plan,
+        memories: wire.memories,
+        relationships: wire.relationships,
+        accept_plots: wire.accept_plots,
+        accept_heard_proposals: wire.accept_heard_proposals,
+    })
 }
 
 fn object(properties: Value) -> Value {
@@ -107,7 +123,7 @@ fn field(name: &str) -> Value {
             json!({"type":"integer","minimum":0,"maximum":65535,"description":"Copy the actual visible item ID. If you already hold the item, use its real ID, never zero. Zero is only the last portion acquired by take, steal, or accept_offer earlier in this same plan; it is not an inventory slot or a newly crafted item's ID."})
         }
         "seconds" => json!({"type":"integer","minimum":5,"maximum":1800}),
-        "recipe" => choice(&["meal", "lockpick", "medicine"]),
+        "recipe" => json!({"type":"string","enum":Recipe::ALL}),
         "style" => choice(&["lethal", "subdue"]),
         "mode" => choice(&["heal", "poison", "pick_lock", "trap"]),
         "volume" => choice(&["normal", "whisper", "shout"]),
@@ -190,7 +206,7 @@ pub fn decision_schema() -> Value {
         json!({"type":"array","items":{"type":"integer","minimum":1},"minItems":1,"maxItems":8});
     let delta = json!({"type":"integer","minimum":-15,"maximum":15});
     object(
-        json!({"summary":text(300),"goals":array(text(240),5),"plan":{"type":"array","items":intents(false),"maxItems":6,"description":"Physical steps only. Empty can mean continue your activity or quietly observe. Words are optional and belong in utterance. At most six steps total including a non-null utterance. Later steps must satisfy their preconditions when executed."},
+        json!({"summary":{"anyOf":[{"type":"string","maxLength":NOTEBOOK_MAX_CHARS},{"type":"null"}],"description":"Your durable private notebook: null keeps it, a string replaces it, empty clears it. Keep unresolved intentions, progress and next steps concise. This is fallible thought, never a physical outcome."},"goals":array(text(240),5),"plan":{"type":"array","items":intents(false),"maxItems":6,"description":"Physical steps only. Empty can mean continue your activity or quietly observe. Words are optional and belong in utterance. At most six steps total including a non-null utterance. Later steps must satisfy their preconditions when executed."},
         "utterance":{"anyOf":[object(json!({"text":text(1200),"targetId":{"anyOf":[id(),{"type":"null"}]},"volume":field("volume"),"plot":{"anyOf":[object(json!({"victimId":id()})),{"type":"null"}]},"afterSteps":{"type":"integer","minimum":0,"maximum":6}})),{"type":"null"}],"description":"Words you actually want someone to hear, or null for silence. Not a report of your plan, private thoughts, or execution metadata. Genuine coordination, promises and explanations can be spoken when socially motivated. afterSteps is the number of physical steps to finish before speaking, from zero to plan length."},
         "memories":array(object(json!({"text":text(600),"kind":choice(&["belief","reflection"]),"evidenceIds":evidence,"importance":{"type":"integer","minimum":1,"maximum":10}})),4),
         "relationships":array(object(json!({"targetId":id(),"trust":delta,"affection":delta,"fear":delta,"respect":delta,"evidenceIds":evidence})),4),"acceptPlots":array(id(),3),
@@ -250,16 +266,19 @@ mod tests {
     fn words(position: u8) -> Value {
         json!({"text":"Here.","targetId":null,"volume":"normal","plot":null,"afterSteps":position})
     }
+    fn wire_value(raw: Value) -> Result<Value> {
+        Ok(serde_json::to_value(normalize_decision(raw)?)?)
+    }
     #[test]
     fn utterance_is_optional_and_preserves_every_execution_position() {
         let physical =
             json!([{"kind":"take","itemId":12,"quantity":1},{"kind":"drink","itemId":0}]);
         assert_eq!(
-            normalize_decision(wire(physical.clone(), Value::Null)).unwrap()["plan"],
+            wire_value(wire(physical.clone(), Value::Null)).unwrap()["plan"],
             physical
         );
         for position in 0..=2 {
-            let result = normalize_decision(wire(physical.clone(), words(position))).unwrap();
+            let result = wire_value(wire(physical.clone(), words(position))).unwrap();
             let plan = result["plan"].as_array().unwrap();
             assert_eq!(plan[usize::from(position)]["kind"], "speak");
             let remaining: Vec<_> = plan
@@ -271,35 +290,63 @@ mod tests {
             assert!(result.get("utterance").is_none());
         }
         assert_eq!(
-            normalize_decision(wire(json!([]), words(0))).unwrap()["plan"]
+            wire_value(wire(json!([]), words(0))).unwrap()["plan"]
                 .as_array()
                 .unwrap()
                 .len(),
             1
         );
         assert_eq!(
-            normalize_decision(wire(json!([]), Value::Null)).unwrap()["plan"],
+            wire_value(wire(json!([]), Value::Null)).unwrap()["plan"],
             json!([])
         );
     }
     #[test]
     fn wire_rejects_bad_positions_embedded_speech_and_combined_limit() {
-        assert!(normalize_decision(wire(json!([]), words(1))).is_err());
+        assert!(wire_value(wire(json!([]), words(1))).is_err());
         assert!(
-            normalize_decision(wire(
+            wire_value(wire(
                 json!([{"kind":"speak","text":"Hi","targetId":null,"volume":"normal","plot":null}]),
                 Value::Null
             ))
             .is_err()
         );
         let plan = json!(vec![json!({"kind":"inspect","targetId":11}); 6]);
-        assert!(normalize_decision(wire(plan.clone(), Value::Null)).is_ok());
-        assert!(normalize_decision(wire(plan, words(0))).is_err());
+        assert!(wire_value(wire(plan.clone(), Value::Null)).is_ok());
+        assert!(wire_value(wire(plan, words(0))).is_err());
         let mut missing = wire(json!([]), Value::Null);
         missing.as_object_mut().unwrap().remove("utterance");
         assert!(normalize_decision(missing).is_err());
         let mut missing = words(0);
         missing.as_object_mut().unwrap().remove("plot");
-        assert!(normalize_decision(wire(json!([]), missing)).is_err());
+        assert!(wire_value(wire(json!([]), missing)).is_err());
+    }
+    #[test]
+    fn notebook_is_nullable_bounded_and_independent_of_listener_summary() {
+        for summary in [Value::Null, json!(""), json!("A".repeat(1200))] {
+            let mut raw = wire(json!([]), Value::Null);
+            raw["summary"] = summary.clone();
+            assert_eq!(
+                json!(normalize_decision(raw.clone()).unwrap().summary),
+                summary
+            );
+            raw.as_object_mut().unwrap().remove("utterance");
+            assert!(Decision::parse(raw).is_ok());
+        }
+        for summary in [json!("A".repeat(1201)), json!(" "), json!("\u{001b}")] {
+            let mut raw = wire(json!([]), Value::Null);
+            raw["summary"] = summary;
+            assert!(normalize_decision(raw).is_err());
+        }
+        let mut missing = wire(json!([]), Value::Null);
+        missing.as_object_mut().unwrap().remove("summary");
+        assert!(normalize_decision(missing.clone()).is_err());
+        missing.as_object_mut().unwrap().remove("utterance");
+        assert!(Decision::parse(missing).is_err());
+        assert!(crate::model::Interpretation::parse(json!({"summary":null,"plan":[]})).is_err());
+        assert!(
+            crate::model::Interpretation::parse(json!({"summary":"A".repeat(301),"plan":[]}))
+                .is_err()
+        );
     }
 }

@@ -94,6 +94,61 @@ fn recipe_spec(recipe: Recipe) -> RecipeSpec {
     }
 }
 
+struct NeedsProjection {
+    hunger: f64,
+    thirst: f64,
+    fatigue: f64,
+    health_before_damage: f64,
+    damage: f64,
+}
+/// Pure physiology shared by advancement and conditional duration forecasts.
+fn project_needs(actor: &Actor, tuning: &Tuning, seconds: f64, resting: bool) -> NeedsProjection {
+    if !actor.alive() {
+        return NeedsProjection {
+            hunger: actor.hunger,
+            thirst: actor.thirst,
+            fatigue: actor.fatigue,
+            health_before_damage: actor.health,
+            damage: 0.0,
+        };
+    }
+    let hours = seconds / 3600.0;
+    let hunger = clamp(actor.hunger + hours * tuning.hunger_per_hour);
+    let thirst = clamp(actor.thirst + hours * tuning.thirst_per_hour);
+    let fatigue = clamp(
+        actor.fatigue
+            + hours
+                * if resting {
+                    -tuning.rest_per_hour
+                } else {
+                    tuning.fatigue_per_hour
+                },
+    );
+    let health_before_damage =
+        if resting && actor.flags & UNCONSCIOUS == 0 && hunger < 90.0 && thirst < 90.0 {
+            clamp(actor.health + hours * 8.0)
+        } else {
+            actor.health
+        };
+    let beyond = |before: f64, rate: f64| {
+        if rate > 0.0 {
+            (hours - (100.0 - before) / rate).max(0.0)
+        } else if before >= 100.0 {
+            hours
+        } else {
+            0.0
+        }
+    };
+    NeedsProjection {
+        hunger,
+        thirst,
+        fatigue,
+        health_before_damage,
+        damage: beyond(actor.hunger, tuning.hunger_per_hour) * 12.0
+            + beyond(actor.thirst, tuning.thirst_per_hour) * 25.0,
+    }
+}
+
 /// Sole owner of physical state. Models and terminal clients only submit validated intents.
 pub struct Engine {
     pub world: WorldState,
@@ -297,6 +352,7 @@ impl Engine {
                 entered_event_id: 0,
                 last_action_outcome: None,
                 last_plan_failure: None,
+                recent_action_outcomes: vec![],
                 correction_used: false,
             });
         }
@@ -307,7 +363,7 @@ impl Engine {
             actor.portrait_key = Some(key);
         }
         let world = WorldState {
-            format: 5,
+            format: 6,
             language: language.into(),
             scenario_id: content.id.clone(),
             mode: mode.into(),
@@ -526,7 +582,7 @@ impl Engine {
                     candidates.push(TextOrigin::Authored(id));
                 }
             }
-            for recipe in [Recipe::Meal, Recipe::Lockpick, Recipe::Medicine] {
+            for recipe in Recipe::ALL {
                 let spec = recipe_spec(recipe);
                 if item.kind == spec.kind
                     && (item.name == spec.name
@@ -658,6 +714,33 @@ impl Engine {
         } else {
             words.join(", ")
         }
+    }
+    fn felt_needs(&self, actor: &Actor) -> Value {
+        let describe =
+            |value: f64, mild: (&str, &str), strong: (&str, &str), urgent: (&str, &str)| {
+                let crossed = self
+                    .tuning
+                    .need_thresholds
+                    .iter()
+                    .filter(|threshold| value >= **threshold)
+                    .count();
+                let words = match crossed {
+                    0 => return self.text("not pressing", "nie dokucza"),
+                    n if n == self.tuning.need_thresholds.len() => urgent,
+                    1 => mild,
+                    _ => strong,
+                };
+                self.text(words.0, words.1)
+            };
+        json!({
+            "hunger":describe(actor.hunger, ("an empty stomach", "pusty żołądek"), ("persistent hunger", "dokuczliwy głód"), ("painful hunger", "bolesny głód")),
+            "thirst":describe(actor.thirst, ("a dry mouth", "suchość w ustach"), ("persistent thirst", "dokuczliwe pragnienie"), ("intense thirst", "silne pragnienie")),
+            "fatigue":describe(actor.fatigue, ("tired", "zmęczenie"), ("heavy limbs", "ciężkie kończyny"), ("exhausted", "wyczerpanie")),
+        })
+    }
+    fn needs_forecast(&self, actor: &Actor, real_seconds: f64, resting: bool) -> Value {
+        let projected = project_needs(actor, &self.tuning, real_seconds * PHYSIOLOGY_RATE, resting);
+        json!({"hungerDelta":projected.hunger-actor.hunger,"thirstDelta":projected.thirst-actor.thirst,"fatigueDelta":projected.fatigue-actor.fatigue,"healthDelta":clamp(projected.health_before_damage-projected.damage)-actor.health})
     }
     pub fn activity_text(&self, actor: &Actor) -> String {
         let Some(activity) = &actor.activity else {
@@ -929,6 +1012,9 @@ impl Engine {
         {
             return Ok(());
         }
+        if invalidate && priority == WakePriority::Danger {
+            self.interrupt_activity(id)?;
+        }
         let actor = self.actor_mut(id)?;
         if cause == WakeCause::External {
             actor.correction_used = false;
@@ -936,7 +1022,6 @@ impl Engine {
         if invalidate {
             actor.invalidate_decision()?;
             if priority == WakePriority::Danger {
-                actor.activity = None;
                 actor.clear_plan();
             }
         }
@@ -1044,7 +1129,7 @@ impl Engine {
             let id=s.allocate_id()?;
             let knowledge=template.knowledge.clone();
             let used:Vec<_>=s.world.actors.iter().filter_map(|a|a.portrait_key.clone()).collect();
-            let actor=Actor{id,name:name.clone(),role:"Prisoner".into(),biography:String::new(),personality:template.personality,portrait_key:Some(crate::portraits::portrait_key(id,&used)),room_id:DUNGEON,health:100.0,hunger:template.hunger,thirst:template.thirst,fatigue:template.fatigue,flags:0,coins:template.coins,equipment:vec![],skills:template.skills,known_rooms:template.known_rooms,known_actors:template.known_actors.into_iter().filter(|id|s.world.actors.iter().any(|a|a.id==*id)).collect(),goals:vec![s.content.objective(&s.language)],relationships:BTreeMap::new(),summary:"A prisoner arrives.".into(),activity:None,plan:vec![],last_acquired_item_id:0,accepted_plots:vec![],decision_version:0,unconscious_until:None,entered_event_id:0,last_action_outcome:None,last_plan_failure:None,correction_used:false};
+            let actor=Actor{id,name:name.clone(),role:"Prisoner".into(),biography:String::new(),personality:template.personality,portrait_key:Some(crate::portraits::portrait_key(id,&used)),room_id:DUNGEON,health:100.0,hunger:template.hunger,thirst:template.thirst,fatigue:template.fatigue,flags:0,coins:template.coins,equipment:vec![],skills:template.skills,known_rooms:template.known_rooms,known_actors:template.known_actors.into_iter().filter(|id|s.world.actors.iter().any(|a|a.id==*id)).collect(),goals:vec![s.content.objective(&s.language)],relationships:BTreeMap::new(),summary:"A prisoner arrives.".into(),activity:None,plan:vec![],last_acquired_item_id:0,accepted_plots:vec![],decision_version:0,unconscious_until:None,entered_event_id:0,last_action_outcome:None,last_plan_failure:None,recent_action_outcomes:vec![],correction_used:false};
             s.world.actors.push(actor);s.world.players.push(HumanPlayer{identity:identity.into(),actor_id:id,listener:false});
             for mut item in source.items.into_iter().filter(|item|item.owner_id==Some(PLAYER)){item.id=s.allocate_id()?;item.owner_id=Some(id);item.poisoned_by=None;item.causes.clear();if item.equipped{s.actor_mut(id)?.equipment.push(item.id);}s.world.items.push(item);}
             for text in knowledge{s.store.remember(Memory{id:0,actor_id:id,time:s.world.time,event_id:None,kind:"background".into(),text:s.authored(&text),importance:8,source_id:Some(id),evidence_ids:vec![],
@@ -1656,9 +1741,9 @@ impl Engine {
             }
         }
         if let Intent::Escort { target_id, door_id } = intent {
+            self.interrupt_activity(target_id)?;
             let target = self.actor_mut(target_id)?;
             target.invalidate_decision()?;
-            target.activity = None;
             target.clear_plan();
             let destination = self.destination(self.door(door_id).context("Missing door.")?, room);
             let mut audience = self.witnesses(room);
@@ -1748,7 +1833,7 @@ impl Engine {
                 None
             },
         )?;
-        Ok(ActionResult::ok(self.text(
+        let result = ActionResult::ok(self.text(
             &format!(
                 "{} begins {}.",
                 self.name(id),
@@ -1759,7 +1844,9 @@ impl Engine {
                 self.name(id),
                 self.activity_text(self.actor(id)?)
             ),
-        )))
+        ));
+        self.remember_outcome(id, intent, &result, false)?;
+        Ok(result)
     }
 
     fn encounter(&self, id: u16) -> Option<&CombatEncounter> {
@@ -1857,8 +1944,8 @@ impl Engine {
                     choice: defended,
                     causes: vec![],
                 });
+            self.interrupt_activity(member)?;
             let actor = self.actor_mut(member)?;
-            actor.activity = None;
             actor.clear_plan();
             actor.invalidate_decision()?;
             self.request_decision(
@@ -1917,9 +2004,8 @@ impl Engine {
                 Some("swing"),
             )?;
         }
-        let actor = self.actor_mut(id)?;
-        actor.activity = None;
-        actor.clear_plan();
+        self.interrupt_activity(id)?;
+        self.actor_mut(id)?.clear_plan();
         self.wakes.remove(&id);
         let participant = self
             .world
@@ -2094,6 +2180,7 @@ impl Engine {
                 }
                 let health_before = self.actor(target_id)?.health;
                 if style == AttackStyle::Subdue && self.actor(target_id)?.health - damage <= 20.0 {
+                    self.interrupt_activity(target_id)?;
                     let deadline = self.world.interaction_time + self.tuning.recovery_seconds;
                     let target = self.actor_mut(target_id)?;
                     let before = target.health;
@@ -2101,7 +2188,6 @@ impl Engine {
                     let dealt = before - target.health;
                     target.flags |= UNCONSCIOUS;
                     target.unconscious_until = Some(deadline);
-                    target.activity = None;
                     target.clear_plan();
                     target.invalidate_decision()?;
                     let mut audience = self.witnesses(encounter.room_id);
@@ -2488,8 +2574,8 @@ impl Engine {
             Some(EventDetails::Injury),
         )?;
         if !self.actor(target_id)?.alive() {
+            self.interrupt_activity(target_id)?;
             let target = self.actor_mut(target_id)?;
-            target.activity = None;
             target.clear_plan();
             target.invalidate_decision()?;
             target.unconscious_until = None;
@@ -2715,9 +2801,9 @@ impl Engine {
                     }
                 }
                 if let Intent::Escort { target_id, .. } = intent {
+                    self.interrupt_activity(*target_id)?;
                     let target = self.actor_mut(*target_id)?;
                     target.room_id = destination;
-                    target.activity = None;
                     target.clear_plan();
                     target.invalidate_decision()?;
                     if !target.known_rooms.contains(&destination) {
@@ -4173,7 +4259,11 @@ impl Engine {
                                 activity.causes.clone(),
                                 None,
                             )?;
-                            if let Some(outcome) = &mut s.actor_mut(actor_id)?.last_action_outcome {
+                            let actor = s.actor_mut(actor_id)?;
+                            if let Some(outcome) = &mut actor.last_action_outcome {
+                                outcome.reason.push_str(&format!(" {message}"));
+                            }
+                            if let Some(outcome) = actor.recent_action_outcomes.last_mut() {
                                 outcome.reason.push_str(&format!(" {message}"));
                             }
                         }
@@ -4233,7 +4323,6 @@ impl Engine {
         })
     }
     fn update_needs(&mut self, game_seconds: f64) -> Result<()> {
-        let hours = game_seconds / 3600.0;
         let mut wakes = Vec::new();
         let mut failing = Vec::new();
         let tuning = self.tuning.clone();
@@ -4242,40 +4331,17 @@ impl Engine {
                 continue;
             }
             let previous = [actor.hunger, actor.thirst, actor.fatigue];
-            actor.hunger = clamp(actor.hunger + hours * tuning.hunger_per_hour);
-            actor.thirst = clamp(actor.thirst + hours * tuning.thirst_per_hour);
             let resting = actor
                 .activity
                 .as_ref()
                 .is_some_and(|a| matches!(a.intent, Intent::Rest { .. }))
                 || actor.flags & UNCONSCIOUS != 0;
-            actor.fatigue = clamp(
-                actor.fatigue
-                    + hours
-                        * if resting {
-                            -tuning.rest_per_hour
-                        } else {
-                            tuning.fatigue_per_hour
-                        },
-            );
-            if resting
-                && actor.flags & UNCONSCIOUS == 0
-                && actor.hunger < 90.0
-                && actor.thirst < 90.0
-            {
-                actor.health = clamp(actor.health + hours * 8.0);
-            }
-            let beyond = |before: f64, rate: f64| {
-                if rate > 0.0 {
-                    (hours - (100.0 - before) / rate).max(0.0)
-                } else if before >= 100.0 {
-                    hours
-                } else {
-                    0.0
-                }
-            };
-            let damage = beyond(previous[0], tuning.hunger_per_hour) * 12.0
-                + beyond(previous[1], tuning.thirst_per_hour) * 25.0;
+            let projected = project_needs(actor, &tuning, game_seconds, resting);
+            actor.hunger = projected.hunger;
+            actor.thirst = projected.thirst;
+            actor.fatigue = projected.fatigue;
+            actor.health = projected.health_before_damage;
+            let damage = projected.damage;
             if damage > 0.0 {
                 failing.push((actor.id, damage, actor.thirst >= 100.0));
             }
@@ -4359,7 +4425,7 @@ impl Engine {
             stage,
         };
         let actor = self.actor_mut(id)?;
-        actor.last_action_outcome = Some(outcome.clone());
+        actor.remember_action_outcome(outcome.clone());
         if !result.ok {
             actor.last_plan_failure = Some(outcome);
         }
@@ -4387,7 +4453,7 @@ impl Engine {
             None,
         )?;
         let time = self.world.time;
-        self.actor_mut(id)?.last_action_outcome = Some(ActionOutcome {
+        self.actor_mut(id)?.remember_action_outcome(ActionOutcome {
             intent: activity.intent,
             ok: false,
             reason: message,
@@ -4500,6 +4566,25 @@ impl Engine {
         source_id: u64,
         combat: Option<Value>,
     ) -> Result<Value> {
+        let interpretation = match Interpretation::parse(raw) {
+            Ok(value) => value,
+            Err(_) => {
+                return Ok(ActionResult::fail(self.text(
+                    "The listener returned an invalid action sequence.",
+                    "Interpretator zwrócił nieprawidłową sekwencję działań.",
+                ))
+                .value());
+            }
+        };
+        self.start_interpreted_plan(id, interpretation, source_id, combat)
+    }
+    pub fn start_interpreted_plan(
+        &mut self,
+        id: u16,
+        interpretation: Interpretation,
+        source_id: u64,
+        combat: Option<Value>,
+    ) -> Result<Value> {
         let context: Option<CombatContext> = match combat {
             Some(value) => match serde_json::from_value(value) {
                 Ok(value) => Some(value),
@@ -4519,24 +4604,7 @@ impl Engine {
             ))
             .value());
         }
-        let interpretation: Interpretation = match serde_json::from_value(raw) {
-            Ok(result) => result,
-            Err(_) => {
-                return Ok(ActionResult::fail(self.text(
-                    "The listener returned an invalid action sequence.",
-                    "Interpretator zwrócił nieprawidłową sekwencję działań.",
-                ))
-                .value());
-            }
-        };
-        if check_text(&interpretation.summary, 300).is_err()
-            || check_new_plan(&interpretation.plan).is_err()
-            || interpretation.plan.len() > 3
-            || interpretation
-                .plan
-                .iter()
-                .any(|intent| intent.check().is_err() || matches!(intent, Intent::Speak { .. }))
-        {
+        if interpretation.check().is_err() {
             return Ok(ActionResult::fail(self.text(
                 "The listener returned an invalid action sequence.",
                 "Interpretator zwrócił nieprawidłową sekwencję działań.",
@@ -4624,6 +4692,25 @@ impl Engine {
         expected_version: u64,
         recalled: &[u64],
     ) -> Result<Value> {
+        let decision = match Decision::parse(raw) {
+            Ok(value) => value,
+            Err(error) => {
+                return Ok(ActionResult::fail(self.text(
+                    &format!("Invalid NPC decision: {error}"),
+                    &format!("Nieprawidłowa decyzja postaci: {error}"),
+                ))
+                .value());
+            }
+        };
+        self.apply_npc_decision(id, decision, expected_version, recalled)
+    }
+    pub fn apply_npc_decision(
+        &mut self,
+        id: u16,
+        decision: Decision,
+        expected_version: u64,
+        recalled: &[u64],
+    ) -> Result<Value> {
         let actor = self.actor(id)?.clone();
         if self.is_player(id) || expected_version != actor.decision_version || !actor.awake() {
             return Ok(ActionResult::fail(self.text(
@@ -4632,7 +4719,7 @@ impl Engine {
             ))
             .value());
         }
-        let decision = match Decision::parse(raw) {
+        let decision = match Decision::check(decision) {
             Ok(decision) => decision,
             Err(error) => {
                 return Ok(ActionResult::fail(self.text(
@@ -4785,7 +4872,9 @@ impl Engine {
                 s.interrupt_activity(id)?;
             }
             let actor = s.actor_mut(id)?;
-            actor.summary = decision.summary;
+            if let Some(summary) = decision.summary {
+                actor.summary = summary;
+            }
             actor.goals = decision.goals;
             if !preserve_activity {
                 actor.last_acquired_item_id = 0;
@@ -4926,34 +5015,48 @@ impl Engine {
         .or_else(|error| Ok(ActionResult::fail(error.to_string()).value()))
     }
     pub fn recall(&self, id: u16, query: &str) -> Result<Value> {
-        self.actor(id)?;
+        let aliases = self.known_aliases(id)?;
         Ok(json!(
             self.store
-                .recall(id, query, 24)?
+                .recall_with_aliases(id, query, [6, 10, 8], &[], &aliases)?
                 .iter()
                 .map(|m| self.describe_memory(m))
                 .collect::<Vec<_>>()
         ))
     }
+    fn known_aliases(&self, id: u16) -> Result<Vec<Vec<String>>> {
+        let actor = self.actor(id)?;
+        Ok(self
+            .world
+            .actors
+            .iter()
+            .filter(|a| a.id == id || actor.known_actors.contains(&a.id))
+            .filter(|a| !self.is_player(a.id))
+            .map(|a| self.content.aliases(a.id))
+            .collect())
+    }
     pub fn observation(&self, id: u16, reason: &str) -> Result<Value> {
         let actor = self.actor(id)?;
         let described = self.describe_actor(actor);
-        let query = format!(
-            "{reason} {} {} {}",
+        let nearby_names = self
+            .nearby(id)?
+            .iter()
+            .filter(|a| a.id != id)
+            .map(|a| self.name(a.id))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let query = crate::store::context_query(&[
             actor
                 .goals
                 .iter()
                 .map(|goal| self.authored(goal))
                 .collect::<Vec<_>>()
                 .join(" "),
+            nearby_names,
+            reason.to_owned(),
+            actor.summary.clone(),
             self.name(actor.room_id),
-            self.nearby(id)?
-                .iter()
-                .filter(|a| a.id != id)
-                .map(|a| self.name(a.id))
-                .collect::<Vec<_>>()
-                .join(" ")
-        );
+        ]);
         let room_context = crate::room_context::room_context(
             &self.store,
             actor,
@@ -4961,11 +5064,12 @@ impl Engine {
             &self.language,
             crate::room_context::ContextBudget::default(),
         )?;
-        let memories = self.store.recall_with_ranges(
+        let memories = self.store.recall_with_aliases(
             id,
             &query,
             [6, 10, 8],
             &room_context.excluded_ranges(),
+            &self.known_aliases(id)?,
         )?;
         let mut evidence = room_context.evidence_ids();
         evidence.extend(memories.iter().map(|m| m.id));
@@ -5015,30 +5119,28 @@ impl Engine {
                 value
             })
             .collect::<Vec<_>>();
-        let action_details = self.actions(id)?;
-        let available_actions = action_details
-            .iter()
-            .filter(|action| action["available"] == true)
-            .map(|action| action["intent"].clone())
-            .collect::<Vec<_>>();
-        let mut recipes = json!([{"recipe":"meal","roomId":4,"skill":"craft","minimum":20,"consumes":"ingredient"},{"recipe":"lockpick","roomId":8,"skill":"craft","minimum":25,"consumes":"metal"},{"recipe":"medicine","roomId":7,"skill":"medicine","minimum":50,"consumes":"herb"}]);
-        for recipe in recipes.as_array_mut().expect("recipe array") {
-            let intent = Intent::Work {
-                recipe: serde_json::from_value(recipe["recipe"].clone())?,
-            };
-            recipe["availableNow"] = json!(
-                self.validate_intent(id, &intent)
-                    .and_then(|_| self.check_busy(id, &intent))
-                    .is_ok()
-            );
+        let actions = self.action_choices(id, true)?;
+        let recipes = Recipe::ALL.into_iter().map(|recipe| {
+            let spec = recipe_spec(recipe);
+            let intent = Intent::Work { recipe };
+            json!({"recipe":recipe,"roomId":spec.room,"skill":if spec.medicine {"medicine"} else {"craft"},"minimum":spec.minimum,"consumes":spec.ingredient,
+                "availableNow":self.validate_intent(id, &intent).and_then(|_| self.check_busy(id, &intent)).is_ok()})
+        }).collect::<Vec<_>>();
+        let mut combat = self.combat_view(id)?;
+        if let Some(combat) = combat.as_object_mut() {
+            combat.remove("choices");
         }
+        let continuing = actor.activity.as_ref().map(|activity| {
+            let seconds = self.activity_remaining(activity);
+            json!({"durationRealSeconds":seconds,"needs":self.needs_forecast(actor, seconds, matches!(activity.intent, Intent::Rest { .. }) || actor.flags & UNCONSCIOUS != 0)})
+        });
         Ok(json!({
             "context":{"branch":self.world.branch,"version":actor.decision_version,"evidenceIds":evidence,"combat":self.combat_context(id)},
             "input":{
                 "language":self.language,"scenarioId":self.world.scenario_id,
                 "world":{
                     "time":self.world.time,
-                    "self":{"id":id,"name":described["name"],"aliases":if self.is_player(id){vec![]}else{self.content.aliases(id)},"role":described["role"],"biography":described["biography"],"personality":described["personality"],"coins":actor.coins,"condition":self.condition(actor),"goals":described["goals"],"relationships":actor.relationships,"lastSummary":described["summary"],"activity":self.activity_text(actor),"commitments":commitments},
+                    "self":{"id":id,"name":described["name"],"aliases":if self.is_player(id){vec![]}else{self.content.aliases(id)},"role":described["role"],"biography":described["biography"],"personality":described["personality"],"coins":actor.coins,"condition":self.condition(actor),"goals":described["goals"],"relationships":actor.relationships,"notebook":actor.summary,"feltNeeds":self.felt_needs(actor),"activity":self.activity_text(actor),"commitments":commitments},
                     "room":self.describe_room(actor.room_id)?,"doors":doors,"people":people,"items":items,
                     "knownPeople":known_people,"knownMap":known_map,
                     "offers":self.world.offers.iter().filter(|o|o.to==id && o.status=="open" && !self.offer_expired(o)).collect::<Vec<_>>(),
@@ -5048,11 +5150,10 @@ impl Engine {
                     "reason":reason,
                     "timeRules":{"calendarSecondsPerRealSecond":CLOCK_RATE,"physiologySecondsPerRealSecond":PHYSIOLOGY_RATE,"activitySecondsAre":"calendar","reactionSchedulingUses":"real seconds"},
                     "speechRule":if self.world.mode=="multiplayer"{"Normal speech stays in this room. Shouts reach adjoining rooms, with partially heard words. Never whisper."}else{"Speech follows normal, whisper and shout perception."},
-                    "combat":self.combat_view(id)?,
+                    "combat":combat,
                     "people":self.nearby(id)?.iter().filter(|a|a.id!=id).map(|person|json!({"id":person.id,"health":person.health})).collect::<Vec<_>>(),
-                    "self":{"health":actor.health,"hunger":actor.hunger,"thirst":actor.thirst,"fatigue":actor.fatigue,"skills":actor.skills,"currentActivity":self.current_activity(actor),"remainingPlan":actor.plan,"lastActionOutcome":actor.last_action_outcome,"lastPlanFailure":actor.last_plan_failure},
-                    "recipes":recipes,"availableActions":available_actions,
-                    "actionDetails":action_details.iter().map(|action|json!({"intent":action["intent"],"available":action["available"],"reason":action.get("reason"),"forecast":action["forecast"]})).collect::<Vec<_>>()
+                    "self":{"health":actor.health,"hunger":actor.hunger,"thirst":actor.thirst,"fatigue":actor.fatigue,"skills":actor.skills,"currentActivity":self.current_activity(actor),"remainingPlan":actor.plan,"lastActionOutcome":actor.last_action_outcome,"lastPlanFailure":actor.last_plan_failure,"recentActionOutcomes":actor.recent_action_outcomes,"continuingActivityForecast":continuing},
+                    "recipes":recipes,"actions":actions
                 }
             }
         }))
@@ -5176,101 +5277,41 @@ impl Engine {
         )
     }
     fn action_command(&self, id: u16, intent: &Intent) -> String {
-        let room = self.actor(id).map_or(DUNGEON, |a| a.room_id);
-        let destination = |door_id: u16| {
-            self.door(door_id).map_or_else(
-                || door_id.to_string(),
-                |door| self.name(self.destination(door, room)),
-            )
+        let verb = match intent {
+            Intent::Move { .. } => "go",
+            Intent::AcceptOffer { .. } => "accept",
+            Intent::DeclineOffer { .. } => "decline",
+            Intent::Work { .. } => "make",
+            Intent::Attack {
+                style: AttackStyle::Subdue,
+                ..
+            } => "subdue",
+            Intent::Use { mode, .. } => match mode {
+                UseMode::Heal => "heal",
+                UseMode::Poison => "poison",
+                UseMode::PickLock => "pick",
+                UseMode::Disguise => "disguise",
+                UseMode::Trap => "trap",
+                UseMode::CutBonds => "cut-bonds",
+            },
+            Intent::Speak { .. } => "say",
+            _ => intent.kind(),
         };
-        match intent {
-            Intent::Move { door_id } => format!("/go {}", destination(*door_id)),
-            Intent::Flee { door_id } => format!("/flee {}", destination(*door_id)),
-            Intent::Inspect { target_id } => format!("/inspect {}", self.name(*target_id)),
-            Intent::Take { item_id, .. }
-            | Intent::Steal { item_id, .. }
-            | Intent::Drop { item_id, .. }
-            | Intent::Equip { item_id }
-            | Intent::Eat { item_id }
-            | Intent::Drink { item_id } => format!("/{} {}", intent.kind(), self.name(*item_id)),
-            Intent::Give {
-                item_id, target_id, ..
+        let mut command = format!("/{verb}");
+        for argument in self.action_arguments(id, intent) {
+            if let Some(prefix) = argument["prefix"]
+                .as_str()
+                .filter(|prefix| !prefix.is_empty())
+            {
+                command.push(' ');
+                command.push_str(prefix);
             }
-            | Intent::Offer {
-                item_id, target_id, ..
-            } => format!(
-                "/{} {} to {}",
-                intent.kind(),
-                self.name(*item_id),
-                self.name(*target_id)
-            ),
-            Intent::Pay { target_id, amount } => format!("/pay {} {amount}", self.name(*target_id)),
-            Intent::AcceptOffer { offer_id } | Intent::DeclineOffer { offer_id } => format!(
-                "/{} {}",
-                if matches!(intent, Intent::AcceptOffer { .. }) {
-                    "accept"
-                } else {
-                    "decline"
-                },
-                self.world
-                    .offers
-                    .iter()
-                    .find(|o| o.id == *offer_id)
-                    .map_or_else(|| offer_id.to_string(), |offer| self.name(offer.from))
-            ),
-            Intent::Unlock { door_id }
-            | Intent::Lock { door_id }
-            | Intent::Open { door_id }
-            | Intent::Close { door_id } => format!("/{} {}", intent.kind(), self.name(*door_id)),
-            Intent::Rest { .. }
-            | Intent::Wait { .. }
-            | Intent::Guard { .. }
-            | Intent::Defend { .. }
-            | Intent::Hide { .. } => format!("/{}", intent.kind()),
-            Intent::Work { recipe } => format!(
-                "/make {}",
-                match recipe {
-                    Recipe::Meal => "meal",
-                    Recipe::Lockpick => "lockpick",
-                    Recipe::Medicine => "medicine",
-                }
-            ),
-            Intent::Attack { target_id, style } => format!(
-                "/{} {}",
-                if *style == AttackStyle::Subdue {
-                    "subdue"
-                } else {
-                    "attack"
-                },
-                self.name(*target_id)
-            ),
-            Intent::Bind { target_id } | Intent::Release { target_id } => {
-                format!("/{} {}", intent.kind(), self.name(*target_id))
+            if let Some(value) = argument["value"].as_str() {
+                command.push(' ');
+                command.push_str(value);
             }
-            Intent::Escort { target_id, door_id } => format!(
-                "/escort {} to {}",
-                self.name(*target_id),
-                destination(*door_id)
-            ),
-            Intent::Use {
-                item_id,
-                target_id,
-                mode,
-            } => format!(
-                "/{} {} with {}",
-                match mode {
-                    UseMode::Heal => "heal",
-                    UseMode::Poison => "poison",
-                    UseMode::PickLock => "pick",
-                    UseMode::Disguise => "disguise",
-                    UseMode::Trap => "trap",
-                    UseMode::CutBonds => "cut-bonds",
-                },
-                self.name(*target_id),
-                self.name(*item_id)
-            ),
-            Intent::Speak { .. } => "/say".into(),
         }
+        command
     }
     fn action_applicable(&self, id: u16, intent: &Intent) -> bool {
         let item = intent.item_id().and_then(|id| self.item(id));
@@ -5363,9 +5404,7 @@ impl Engine {
             | Intent::Lock { door_id }
             | Intent::Open { door_id }
             | Intent::Close { door_id } => vec![named(*door_id, "")],
-            Intent::Work { recipe } => vec![
-                json!({"value":match recipe { Recipe::Meal => "meal", Recipe::Lockpick => "lockpick", Recipe::Medicine => "medicine" },"prefix":""}),
-            ],
+            Intent::Work { recipe } => vec![json!({"value":recipe.command(),"prefix":""})],
             _ => intent
                 .item_id()
                 .map_or_else(Vec::new, |item| vec![named(item, "")]),
@@ -5668,7 +5707,7 @@ impl Engine {
                 ),
             ));
         }
-        json!({"effects":effects,"durationCalendarSeconds":calendar,"durationRealSeconds":real,"durationKind":if combat_timing {"maximum"} else {"scheduled"},"hint":hints.join(" · ")})
+        json!({"effects":effects,"durationCalendarSeconds":calendar,"durationRealSeconds":real,"durationKind":if combat_timing {"maximum"} else {"scheduled"},"needsDuringDuration":self.needs_forecast(actor, real, matches!(intent, Intent::Rest { .. }) || actor.flags & UNCONSCIOUS != 0),"hint":hints.join(" · ")})
     }
     fn action_choice(
         &self,
@@ -5677,12 +5716,32 @@ impl Engine {
         group: &str,
         polish_group: &str,
     ) -> Option<Value> {
+        self.action_description(id, intent, group, polish_group, false)
+    }
+    fn action_description(
+        &self,
+        id: u16,
+        intent: Intent,
+        group: &str,
+        polish_group: &str,
+        compact: bool,
+    ) -> Option<Value> {
         if !self.action_applicable(id, &intent) {
             return None;
         }
         let readiness = self
             .validate_intent(id, &intent)
             .and_then(|()| self.check_busy(id, &intent));
+        if compact {
+            let mut forecast = self.action_forecast(id, &intent);
+            forecast.as_object_mut()?.remove("hint");
+            let mut choice =
+                json!({"intent":intent,"available":readiness.is_ok(),"forecast":forecast});
+            if let Err(error) = readiness {
+                choice["reason"] = json!(error.to_string());
+            }
+            return Some(choice);
+        }
         let door_command = matches!(
             intent,
             Intent::Move { .. }
@@ -5776,10 +5835,13 @@ impl Engine {
         Some(choice)
     }
     pub fn actions(&self, id: u16) -> Result<Vec<Value>> {
+        self.action_choices(id, false)
+    }
+    fn action_choices(&self, id: u16, compact: bool) -> Result<Vec<Value>> {
         let actor = self.actor(id)?;
         let mut choices = Vec::new();
         let mut add = |intent: Intent, group: &str, polish: &str| {
-            if let Some(choice) = self.action_choice(id, intent, group, polish) {
+            if let Some(choice) = self.action_description(id, intent, group, polish, compact) {
                 choices.push(choice);
             }
         };
@@ -6005,8 +6067,11 @@ impl Engine {
         if self.encounter(id).is_some() {
             add(Intent::Defend { seconds: 60 }, "Combat", "Walka");
         }
-        for recipe in [Recipe::Meal, Recipe::Lockpick, Recipe::Medicine] {
+        for recipe in Recipe::ALL {
             add(Intent::Work { recipe }, "Work", "Praca");
+        }
+        if compact {
+            return Ok(choices);
         }
         let mut counts: BTreeMap<String, usize> = BTreeMap::new();
         for choice in &choices {
@@ -6099,7 +6164,8 @@ impl Engine {
         }
         Ok(choices)
     }
-    pub fn player_view(&self, id: u16) -> Result<Value> {
+    /// Physical projection shared by the UI and the listener; no journal queries or minds.
+    fn physical_view(&self, id: u16) -> Result<Value> {
         let actor = self.actor(id)?;
         ensure!(
             self.is_player(id),
@@ -6107,6 +6173,26 @@ impl Engine {
         );
         let visible = self.visible_items(id)?;
         let actors=self.nearby(id)?.into_iter().filter(|a|a.id!=id).map(|a|json!({"id":a.id,"name":self.name(a.id),"role":self.role(a),"portraitKey":a.portrait_key,"condition":self.condition(a),"health":a.health,"activity":self.activity_text(a),"equipment":visible.iter().filter(|i|i.owner_id==Some(a.id) && i.equipped).map(|i|self.name(i.id)).collect::<Vec<_>>()})).collect::<Vec<_>>();
+        let map=self.world.rooms.iter().filter(|room|actor.known_rooms.contains(&room.id)).map(|room|json!({"id":room.id,"name":self.name(room.id),"connections":self.exits(room.id).iter().map(|door|self.destination(door,room.id)).filter(|room|actor.known_rooms.contains(room)).map(|room|self.name(room)).collect::<Vec<_>>()})).collect::<Vec<_>>();
+        Ok(
+            json!({"language":self.language,"time":self.world.time,"room":self.describe_room(actor.room_id)?,"actors":actors,"items":visible.iter().filter(|i|i.owner_id!=Some(id)).map(|i|self.visible_item(i)).collect::<Vec<_>>(),"doors":self.door_views(id)?,"self":{"id":id,"name":self.name(id),"role":self.role(actor),"portraitKey":actor.portrait_key,"condition":self.condition(actor),"unconscious":actor.flags&UNCONSCIOUS!=0,"recoverySeconds":actor.unconscious_until.map(|deadline|(deadline-self.world.interaction_time).max(0.0)),"travel":self.travel_view(id)?,"health":actor.health,"hunger":actor.hunger,"thirst":actor.thirst,"fatigue":actor.fatigue,"activity":self.activity_text(actor),"coins":actor.coins,"restrained":actor.flags&RESTRAINED!=0},"combat":self.combat_view(id)?,"inventory":self.inventory(id).into_iter().map(|i|self.visible_item(i)).collect::<Vec<_>>(),"actions":self.actions(id)?,"map":map}),
+        )
+    }
+    pub fn listener_view(&self, id: u16) -> Result<Value> {
+        let mut view = self.physical_view(id)?;
+        view["self"]
+            .as_object_mut()
+            .expect("self projection")
+            .remove("portraitKey");
+        view["actions"]
+            .as_array_mut()
+            .expect("action projection")
+            .retain(|action| action["available"].as_bool() != Some(false));
+        Ok(view)
+    }
+    pub fn player_view(&self, id: u16) -> Result<Value> {
+        let mut view = self.physical_view(id)?;
+        let actor = self.actor(id)?;
         let events = self
             .store
             .events(Some(id), 80)?
@@ -6115,16 +6201,20 @@ impl Engine {
                 event.room_id == Some(actor.room_id) && event.id >= actor.entered_event_id
             })
             .collect::<Vec<_>>();
-        let map=self.world.rooms.iter().filter(|room|actor.known_rooms.contains(&room.id)).map(|room|json!({"id":room.id,"name":self.name(room.id),"connections":self.exits(room.id).iter().map(|door|self.destination(door,room.id)).filter(|room|actor.known_rooms.contains(room)).map(|room|self.name(room)).collect::<Vec<_>>()})).collect::<Vec<_>>();
         let listener = self
             .world
             .players
             .iter()
             .find(|p| p.actor_id == id)
             .is_some_and(|p| p.listener);
-        Ok(
-            json!({"language":self.language,"scenarioId":self.world.scenario_id,"multiplayer":self.world.mode=="multiplayer","roomVisitId":format!("{}:{id}:{}",self.world.branch,actor.entered_event_id),"winner":self.world.winner_id.map(|id|self.name(id)),"branch":self.world.branch,"revision":self.world.revision,"time":self.world.time,"clock":clock_text(self.world.time,&self.language),"paused":if self.world.manual_pause{vec![self.text("Paused","Wstrzymano")]}else{vec![]},"room":self.describe_room(actor.room_id)?,"actors":actors,"items":visible.iter().filter(|i|i.owner_id!=Some(id)).map(|i|self.visible_item(i)).collect::<Vec<_>>(),"doors":self.door_views(id)?,"self":{"id":id,"name":self.name(id),"role":self.role(actor),"portraitKey":actor.portrait_key,"condition":self.condition(actor),"unconscious":actor.flags&UNCONSCIOUS!=0,"recoverySeconds":actor.unconscious_until.map(|deadline|(deadline-self.world.interaction_time).max(0.0)),"travel":self.travel_view(id)?,"health":actor.health,"hunger":actor.hunger,"thirst":actor.thirst,"fatigue":actor.fatigue,"activity":self.activity_text(actor),"coins":actor.coins,"restrained":actor.flags&RESTRAINED!=0},"combat":self.combat_view(id)?,"inventory":self.inventory(id).into_iter().map(|i|self.visible_item(i)).collect::<Vec<_>>(),"events":events,"actions":self.actions(id)?,"map":map,"journal":self.store.memories(id,80)?.iter().map(|m|self.describe_memory(m)).collect::<Vec<_>>(),"saves":[],"objective":self.content.objective(&self.language),"ending":if self.world.ending=="playing" && !actor.alive(){"death"}else{&self.world.ending},"error":null,"listener":{"enabled":listener,"state":"idle","queued":0,"inputId":null,"text":"","summary":"","plan":[],"error":null,"resultId":0,"elapsedMs":0,"calls":0,"tokens":0,"lastLatencyMs":null}}),
-        )
+        let extra = json!({"scenarioId":self.world.scenario_id,"multiplayer":self.world.mode=="multiplayer","roomVisitId":format!("{}:{id}:{}",self.world.branch,actor.entered_event_id),"winner":self.world.winner_id.map(|id|self.name(id)),"branch":self.world.branch,"revision":self.world.revision,"clock":clock_text(self.world.time,&self.language),"paused":if self.world.manual_pause{vec![self.text("Paused","Wstrzymano")]}else{vec![]},"events":events,"journal":self.store.memories(id,80)?.iter().map(|m|self.describe_memory(m)).collect::<Vec<_>>(),"saves":[],"objective":self.content.objective(&self.language),"ending":if self.world.ending=="playing" && !actor.alive(){"death"}else{&self.world.ending},"error":null,"listener":{"enabled":listener,"state":"idle","queued":0,"inputId":null,"text":"","summary":"","plan":[],"error":null,"resultId":0,"elapsedMs":0,"calls":0,"tokens":0,"lastLatencyMs":null}});
+        let Value::Object(extra) = extra else {
+            unreachable!("UI fields are an object")
+        };
+        view.as_object_mut()
+            .expect("physical projection")
+            .extend(extra);
+        Ok(view)
     }
     pub fn manager_view(&self, selected: Option<u16>) -> Result<Value> {
         let actors=self.world.actors.iter().filter(|a|self.world.mode=="multiplayer" || a.id!=PLAYER).map(|actor|{let mut value=self.describe_actor(actor);value["room"]=json!(self.name(actor.room_id));value["controller"]=json!(if self.is_player(actor.id){"human"}else{"ai"});value["connected"]=json!(false);value["status"]=json!({"actorId":actor.id,"state":if !actor.alive(){"dead"}else if actor.activity.is_some(){"acting"}else{"idle"},"reason":self.activity_text(actor),"startedAt":null,"elapsedMs":0,"calls":0,"tokens":0,"lastLatencyMs":null,"error":null});value}).collect::<Vec<_>>();
